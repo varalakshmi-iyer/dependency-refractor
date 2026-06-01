@@ -1,6 +1,8 @@
 import time
 import requests
 import streamlit as st
+import streamlit as st
+import streamlit.components.v1 as components
 
 BACKEND_URL = "http://localhost:8000"
 
@@ -431,15 +433,12 @@ def render_progress(job_id):
         time.sleep(2)
 
 # ── Report screen ──────────────────────────────────────────────────────────────
+
 def render_report():
     html = st.session_state.get("report_html", "")
 
     if not html:
         st.error("No report data found. Please run the analysis again.")
-        if st.button("Reset"):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()
         return
 
     # ── Top bar ────────────────────────────────────────────────────────────
@@ -471,16 +470,21 @@ def render_report():
 
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    # ── Render in iframe — catch any rendering errors ──────────────────────
-    try:
-        st.components.v1.html(html, height=900, scrolling=True)
-    except Exception as e:
-        st.error("Report rendering error: {}".format(e))
-        st.info(
-            "The report was generated successfully. "
-            "Use the Download button above to view it in your browser."
-        )
-        
+    # ── Encode HTML as base64 and render in a sandboxed iframe ────────────
+    import base64
+    encoded = base64.b64encode(html.encode("utf-8")).decode("utf-8")
+    iframe  = (
+        '<iframe '
+        'src="data:text/html;base64,{encoded}" '
+        'width="100%" '
+        'height="900px" '
+        'style="border:none;border-radius:8px;" '
+        'sandbox="allow-scripts allow-same-origin">'
+        '</iframe>'
+    ).format(encoded=encoded)
+
+    st.markdown(iframe, unsafe_allow_html=True)
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 def main():
     if "view" not in st.session_state:
