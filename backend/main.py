@@ -17,6 +17,14 @@ from backend.core.vulnerability_analyzer import VulnerabilityAnalyzer
 from backend.core.unused_analyzer import UnusedDependencyAnalyzer
 from backend.core.pr_submitter import PRSubmitter
 from backend.report.html_generator import generate_report
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger("dependency_refractor")
 
 app = FastAPI(
     title="dependency_refractor",
@@ -77,28 +85,57 @@ def _make_clients(repo_url):
     return snyk, github
 
 
-def _run_analysis(job_id, log_content, repo_url,
-                  branch_name, service_name):
-    # type: (str, str, str, str, str) -> None
-    """Runs full analysis pipeline and stores result in JOBS."""
+def _run_analysis(job_id, log_content, repo_url, branch_name, service_name):
     try:
+        logger.info("[{}] Starting analysis — repo: {} branch: {}".format(
+            job_id, repo_url, branch_name
+        ))
         JOBS[job_id] = {"status": "running", "progress": "Parsing dependency tree..."}
 
-        # Parse log
-        parser    = BuildLogParser()
-        all_deps  = parser.parse(log_content)
-        external  = [d for d in all_deps if not d.is_root]
+        parser   = BuildLogParser()
+        all_deps = parser.parse(log_content)
+        external = [d for d in all_deps if not d.is_root]
+
+        logger.info("[{}] Parsed {} deps ({} external)".format(
+            job_id, len(all_deps), len(external)
+        ))
 
         JOBS[job_id]["progress"] = "Running conflict analysis..."
         snyk, github = _make_clients(repo_url)
 
-        conflict_issues = ConflictAnalyzer(snyk).analyze(external)
+        try:
+            conflict_issues = ConflictAnalyzer(snyk).analyze(external)
+            logger.info("[{}] Conflicts found: {}".format(job_id, len(conflict_issues)))
+        except Exception as e:
+            logger.error("[{}] Conflict analysis failed: {}".format(job_id, e), exc_info=True)
+            conflict_issues = []
+            JOBS[job_id]["errors"] = JOBS[job_id].get("errors", []) + [
+                "Conflict analysis failed: {}".format(e)
+            ]
 
         JOBS[job_id]["progress"] = "Running vulnerability scan..."
-        vuln_results = VulnerabilityAnalyzer(snyk).analyze(external)
+        try:
+            vuln_results = VulnerabilityAnalyzer(snyk).analyze(external)
+            logger.info("[{}] Vuln scan done: {} results".format(job_id, len(vuln_results)))
+        except Exception as e:
+            logger.error("[{}] Vulnerability scan failed: {}".format(job_id, e), exc_info=True)
+            vuln_results = []
+            JOBS[job_id]["errors"] = JOBS[job_id].get("errors", []) + [
+                "Vulnerability scan failed: {}".format(e)
+            ]
 
         JOBS[job_id]["progress"] = "Detecting unused dependencies..."
-        unused_results = UnusedDependencyAnalyzer(github).analyze(branch_name)
+        try:
+            unused_results = UnusedDependencyAnalyzer(github).analyze(branch_name)
+            logger.info("[{}] Unused analysis done: {} files affected".format(
+                job_id, len(unused_results)
+            ))
+        except Exception as e:
+            logger.error("[{}] Unused analysis failed: {}".format(job_id, e), exc_info=True)
+            unused_results = {}
+            JOBS[job_id]["errors"] = JOBS[job_id].get("errors", []) + [
+                "Unused dependency analysis failed: {}".format(str(e))
+            ]
 
         JOBS[job_id]["progress"] = "Generating report..."
         html = generate_report(
@@ -110,20 +147,22 @@ def _run_analysis(job_id, log_content, repo_url,
             all_deps=all_deps,
         )
 
+        logger.info("[{}] Report generated successfully".format(job_id))
         JOBS[job_id] = {
             "status":   "done",
             "progress": "Complete",
             "html":     html,
+            "errors":   JOBS[job_id].get("errors", []),
         }
 
     except Exception as e:
+        logger.error("[{}] Analysis failed: {}".format(job_id, e), exc_info=True)
         JOBS[job_id] = {
             "status":   "error",
             "progress": str(e),
             "html":     "",
+            "errors":   [str(e)],
         }
-
-
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
 @app.get("/health")
@@ -188,13 +227,13 @@ async def analyze_with_upload(
 
 @app.get("/job/{job_id}")
 def get_job_status(job_id: str):
-    """Poll for job status and progress."""
     job = JOBS.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return {
         "status":   job["status"],
         "progress": job.get("progress", ""),
+        "errors":   job.get("errors", []),   # ← expose errors to frontend
     }
 
 

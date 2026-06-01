@@ -2,6 +2,8 @@ import re
 import requests
 from typing import List, Optional
 from backend.core.models import DependencyResult, Vulnerability
+import logging
+logger = logging.getLogger("dependency_refractor.snyk")
 
 
 class SnykClient:
@@ -20,8 +22,9 @@ class SnykClient:
         self.ssl_verify = ssl_verify
         self.timeout  = timeout
 
+
     def test_dependency(self, group, artifact, version):
-        # type: (str, str, str) -> DependencyResult
+        logger.info("Snyk check: {}:{}:{}".format(group, artifact, version))
         try:
             url = "{}/test/maven/{}/{}/{}".format(
                 self.base, group, artifact, version
@@ -34,17 +37,46 @@ class SnykClient:
                 verify=self.ssl_verify,
                 timeout=self.timeout,
             )
+            logger.info("Snyk response: {} for {}:{}:{}".format(
+                r.status_code, group, artifact, version
+            ))
             if r.status_code == 404:
+                logger.warning("Snyk: package not found {}:{}:{}".format(
+                    group, artifact, version
+                ))
                 return DependencyResult(
                     group=group, artifact=artifact,
                     version=version, is_vulnerable=False,
                 )
+            if r.status_code == 401:
+                raise RuntimeError(
+                    "Snyk 401 Unauthorized — check SNYK_TOKEN in .env"
+                )
+            if r.status_code == 403:
+                raise RuntimeError(
+                    "Snyk 403 Forbidden — check SNYK_ORG_ID in .env"
+                )
             r.raise_for_status()
             return self._parse_result(group, artifact, version, r.json())
-        except Exception as e:
-            print("[Snyk] Error for {}:{}:{} — {}".format(
-                group, artifact, version, e
+
+        except requests.exceptions.ConnectionError as e:
+            logger.error("Snyk connection error: {}".format(e))
+            raise RuntimeError(
+                "Cannot reach Snyk API. Check proxy settings. Detail: {}".format(e)
+            )
+        except requests.exceptions.Timeout:
+            logger.error("Snyk request timed out for {}:{}:{}".format(
+                group, artifact, version
             ))
+            raise RuntimeError(
+                "Snyk request timed out — increase SNYK_TIMEOUT in .env"
+            )
+        except RuntimeError:
+            raise
+        except Exception as e:
+            logger.error("Snyk unexpected error for {}:{}:{} — {}".format(
+                group, artifact, version, e
+            ), exc_info=True)
             return DependencyResult(
                 group=group, artifact=artifact,
                 version=version, is_vulnerable=False,

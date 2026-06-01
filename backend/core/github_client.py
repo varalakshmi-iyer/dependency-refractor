@@ -2,7 +2,8 @@ import base64
 import requests
 from typing import List, Optional
 from backend.core.models import UnusedDependencyResult
-
+import logging
+logger = logging.getLogger("dependency_refractor.github")
 
 class GitHubClient:
 
@@ -22,16 +23,46 @@ class GitHubClient:
         self.ssl_verify = ssl_verify
         self.timeout   = timeout
 
+
     def _get(self, path, params=None):
-        # type: (str, dict) -> dict
         url = "{}/repos/{}{}".format(self.BASE, self.repo, path)
-        r   = requests.get(
-            url, headers=self.headers, params=params,
-            proxies=self.proxies, verify=self.ssl_verify,
-            timeout=self.timeout,
-        )
-        r.raise_for_status()
-        return r.json()
+        logger.info("GET {}".format(url))
+        try:
+            r = requests.get(
+                url, headers=self.headers, params=params,
+                proxies=self.proxies, verify=self.ssl_verify,
+                timeout=self.timeout,
+            )
+            logger.info("Response: {} {}".format(r.status_code, url))
+            if not r.ok:
+                logger.error("GitHub error {}: {}".format(r.status_code, r.text[:300]))
+            r.raise_for_status()
+            return r.json()
+        except requests.exceptions.ConnectionError as e:
+            logger.error("GitHub connection error: {}".format(e))
+            raise RuntimeError(
+                "Cannot reach GitHub. Check proxy settings and network. Detail: {}".format(e)
+            )
+        except requests.exceptions.Timeout:
+            logger.error("GitHub request timed out: {}".format(url))
+            raise RuntimeError("GitHub request timed out — try increasing timeout in .env")
+        except requests.exceptions.HTTPError as e:
+            logger.error("GitHub HTTP error: {} — {}".format(e, url))
+            if r.status_code == 401:
+                raise RuntimeError(
+                    "GitHub 401 Unauthorized — check GITHUB_PAT in .env"
+                )
+            elif r.status_code == 404:
+                raise RuntimeError(
+                    "GitHub 404 — repo '{}' or path '{}' not found. "
+                    "Check repo URL and branch name.".format(self.repo, path)
+                )
+            elif r.status_code == 403:
+                raise RuntimeError(
+                    "GitHub 403 Forbidden — PAT may lack 'repo' scope. "
+                    "Check token permissions."
+                )
+            raise
 
     def _post(self, path, payload):
         # type: (str, dict) -> dict

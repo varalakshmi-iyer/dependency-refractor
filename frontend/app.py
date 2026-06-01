@@ -365,19 +365,22 @@ def render_progress(job_id):
 
     progress_bar = st.progress(0)
     status_text  = st.empty()
-    step_map     = {
-        "Parsing dependency tree...":          10,
-        "Running conflict analysis...":        30,
-        "Running vulnerability scan...":       60,
-        "Detecting unused dependencies...":    80,
-        "Generating report...":                95,
-        "Complete":                           100,
+    error_box    = st.empty()     # ← new: shows non-fatal errors in real time
+
+    step_map = {
+        "Parsing dependency tree...":        10,
+        "Running conflict analysis...":      30,
+        "Running vulnerability scan...":     60,
+        "Detecting unused dependencies...":  80,
+        "Generating report...":              95,
+        "Complete":                         100,
     }
 
     while True:
-        job = poll_job(job_id)
+        job      = poll_job(job_id)
         status   = job.get("status", "")
         progress = job.get("progress", "Working...")
+        errors   = job.get("errors", [])
 
         pct = step_map.get(progress, 50)
         progress_bar.progress(pct)
@@ -387,22 +390,45 @@ def render_progress(job_id):
             unsafe_allow_html=True,
         )
 
+        # Show non-fatal errors as warnings while still running
+        if errors:
+            with error_box.container():
+                for err in errors:
+                    st.warning("⚠️ {}".format(err))
+
         if status == "done":
             progress_bar.progress(100)
+            # Show warnings for partial failures but still show report
+            if errors:
+                st.warning(
+                    "Analysis completed with {} warning(s). "
+                    "Some sections may be incomplete.".format(len(errors))
+                )
+                for err in errors:
+                    st.caption("⚠️ {}".format(err))
             st.session_state["report_html"] = fetch_report(job_id)
             st.session_state["view"]        = "report"
             st.rerun()
             break
 
         elif status == "error":
-            st.error("Analysis failed: {}".format(progress))
-            if st.button("Reset"):
+            st.error("❌ Analysis failed: {}".format(progress))
+            st.markdown(
+                '<div style="font-family:monospace;font-size:12px;'
+                'color:#94a3b8;padding:16px;background:#0d1117;'
+                'border:1px solid #1e293b;border-radius:8px;margin-top:12px;">'
+                'Check the FastAPI terminal logs for full stack trace.'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown('<div class="reset-btn">', unsafe_allow_html=True)
+            if st.button("Reset and try again"):
                 st.session_state["view"] = "input"
                 st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
             break
 
         time.sleep(2)
-
 
 # ── Report screen ──────────────────────────────────────────────────────────────
 def render_report():
