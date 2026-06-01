@@ -434,7 +434,15 @@ def render_progress(job_id):
 def render_report():
     html = st.session_state.get("report_html", "")
 
-    # ── Top bar ────────────────────────────────────────────────────────────────
+    if not html:
+        st.error("No report data found. Please run the analysis again.")
+        if st.button("Reset"):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
+        return
+
+    # ── Top bar ────────────────────────────────────────────────────────────
     col1, col2, col3 = st.columns([2, 1, 1])
 
     with col1:
@@ -463,10 +471,16 @@ def render_report():
 
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    # ── Render HTML report in iframe ───────────────────────────────────────────
-    st.components.v1.html(html, height=900, scrolling=True)
-
-
+    # ── Render in iframe — catch any rendering errors ──────────────────────
+    try:
+        st.components.v1.html(html, height=900, scrolling=True)
+    except Exception as e:
+        st.error("Report rendering error: {}".format(e))
+        st.info(
+            "The report was generated successfully. "
+            "Use the Download button above to view it in your browser."
+        )
+        
 # ── Main ───────────────────────────────────────────────────────────────────────
 def main():
     if "view" not in st.session_state:

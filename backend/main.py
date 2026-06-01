@@ -87,67 +87,89 @@ def _make_clients(repo_url):
 
 def _run_analysis(job_id, log_content, repo_url, branch_name, service_name):
     try:
-        logger.info("[{}] Starting analysis — repo: {} branch: {}".format(
-            job_id, repo_url, branch_name
+        logger.info("[{}] Starting — log size: {} bytes".format(
+            job_id, len(log_content)
         ))
-        JOBS[job_id] = {"status": "running", "progress": "Parsing dependency tree..."}
+        JOBS[job_id] = {"status": "running", "progress": "Parsing dependency tree...", "errors": []}
 
+        # ── Parse ──────────────────────────────────────────────────────────
         parser   = BuildLogParser()
         all_deps = parser.parse(log_content)
         external = [d for d in all_deps if not d.is_root]
 
-        logger.info("[{}] Parsed {} deps ({} external)".format(
-            job_id, len(all_deps), len(external)
+        logger.info("[{}] Parse result — total: {}, external: {}, root: {}".format(
+            job_id, len(all_deps), len(external),
+            len([d for d in all_deps if d.is_root])
         ))
 
+        # ── Guard: if no deps parsed, log the first 500 chars of input ────
+        if not all_deps:
+            logger.warning("[{}] No dependencies parsed. Log preview:\n{}".format(
+                job_id, log_content[:500]
+            ))
+            JOBS[job_id]["errors"].append(
+                "No dependencies found in build log. "
+                "Check that the log is in pkg:mvn format."
+            )
+
+        if not external:
+            logger.warning("[{}] No external deps — conflict and vuln analysis will be empty".format(job_id))
+            JOBS[job_id]["errors"].append(
+                "No external dependencies found — "
+                "all entries may be root services (UNKNOWN status). "
+                "Conflict and vulnerability tabs will be empty."
+            )
+
+        # ── Conflict ───────────────────────────────────────────────────────
         JOBS[job_id]["progress"] = "Running conflict analysis..."
         snyk, github = _make_clients(repo_url)
 
         try:
             conflict_issues = ConflictAnalyzer(snyk).analyze(external)
-            logger.info("[{}] Conflicts found: {}".format(job_id, len(conflict_issues)))
+            logger.info("[{}] Conflicts: {}".format(job_id, len(conflict_issues)))
         except Exception as e:
-            logger.error("[{}] Conflict analysis failed: {}".format(job_id, e), exc_info=True)
+            logger.error("[{}] Conflict failed: {}".format(job_id, e), exc_info=True)
             conflict_issues = []
-            JOBS[job_id]["errors"] = JOBS[job_id].get("errors", []) + [
-                "Conflict analysis failed: {}".format(e)
-            ]
+            JOBS[job_id]["errors"].append("Conflict analysis error: {}".format(str(e)))
 
+        # ── Vulnerability ──────────────────────────────────────────────────
         JOBS[job_id]["progress"] = "Running vulnerability scan..."
         try:
             vuln_results = VulnerabilityAnalyzer(snyk).analyze(external)
-            logger.info("[{}] Vuln scan done: {} results".format(job_id, len(vuln_results)))
+            logger.info("[{}] Vuln results: {}".format(job_id, len(vuln_results)))
         except Exception as e:
-            logger.error("[{}] Vulnerability scan failed: {}".format(job_id, e), exc_info=True)
+            logger.error("[{}] Vuln failed: {}".format(job_id, e), exc_info=True)
             vuln_results = []
-            JOBS[job_id]["errors"] = JOBS[job_id].get("errors", []) + [
-                "Vulnerability scan failed: {}".format(e)
-            ]
+            JOBS[job_id]["errors"].append("Vulnerability scan error: {}".format(str(e)))
 
+        # ── Unused ─────────────────────────────────────────────────────────
         JOBS[job_id]["progress"] = "Detecting unused dependencies..."
         try:
             unused_results = UnusedDependencyAnalyzer(github).analyze(branch_name)
-            logger.info("[{}] Unused analysis done: {} files affected".format(
+            logger.info("[{}] Unused files affected: {}".format(
                 job_id, len(unused_results)
             ))
         except Exception as e:
-            logger.error("[{}] Unused analysis failed: {}".format(job_id, e), exc_info=True)
+            logger.error("[{}] Unused failed: {}".format(job_id, e), exc_info=True)
             unused_results = {}
-            JOBS[job_id]["errors"] = JOBS[job_id].get("errors", []) + [
-                "Unused dependency analysis failed: {}".format(str(e))
-            ]
+            JOBS[job_id]["errors"].append("Unused analysis error: {}".format(str(e)))
 
+        # ── Report ─────────────────────────────────────────────────────────
         JOBS[job_id]["progress"] = "Generating report..."
-        html = generate_report(
-            service_name=service_name or repo_url,
-            branch_name=branch_name,
-            conflict_issues=conflict_issues,
-            vuln_results=vuln_results,
-            unused_results=unused_results,
-            all_deps=all_deps,
-        )
+        try:
+            html = generate_report(
+                service_name=service_name or repo_url,
+                branch_name=branch_name,
+                conflict_issues=conflict_issues,
+                vuln_results=vuln_results,
+                unused_results=unused_results,
+                all_deps=all_deps,
+            )
+        except Exception as e:
+            logger.error("[{}] Report generation failed: {}".format(job_id, e), exc_info=True)
+            raise
 
-        logger.info("[{}] Report generated successfully".format(job_id))
+        logger.info("[{}] Done — HTML size: {} bytes".format(job_id, len(html)))
         JOBS[job_id] = {
             "status":   "done",
             "progress": "Complete",
@@ -156,13 +178,15 @@ def _run_analysis(job_id, log_content, repo_url, branch_name, service_name):
         }
 
     except Exception as e:
-        logger.error("[{}] Analysis failed: {}".format(job_id, e), exc_info=True)
+        logger.error("[{}] Fatal error: {}".format(job_id, e), exc_info=True)
         JOBS[job_id] = {
             "status":   "error",
             "progress": str(e),
             "html":     "",
             "errors":   [str(e)],
         }
+
+
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
 @app.get("/health")
@@ -205,7 +229,6 @@ async def analyze_with_upload(
     service_name: str = Form(""),
     log_file:     UploadFile = File(...),
 ):
-    """Accept uploaded .log or .txt build log file, then run analysis."""
     if not log_file.filename.endswith((".log", ".txt")):
         raise HTTPException(
             status_code=400,
@@ -215,15 +238,24 @@ async def analyze_with_upload(
     content     = await log_file.read()
     log_content = LogFetcher().read_uploaded_file(content)
 
+    # ── Debug: confirm content received ────────────────────────────────────
+    logger.info("Upload received — filename: {}, size: {} bytes, preview: {}".format(
+        log_file.filename,
+        len(content),
+        log_content[:200].replace("\n", " "),
+    ))
+
+    if not log_content.strip():
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
     job_id = str(uuid.uuid4())
-    JOBS[job_id] = {"status": "pending", "progress": "Starting analysis..."}
+    JOBS[job_id] = {"status": "pending", "progress": "Starting analysis...", "errors": []}
 
     background_tasks.add_task(
         _run_analysis, job_id, log_content,
         repo_url, branch_name, service_name,
     )
     return {"job_id": job_id}
-
 
 @app.get("/job/{job_id}")
 def get_job_status(job_id: str):
@@ -267,3 +299,18 @@ def submit_pr(req: PRRequest):
         return {"pr_url": pr_url}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/job/{job_id}/debug")
+def debug_job(job_id: str):
+    job = JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    # Return everything except the full HTML (too large)
+    return {
+        "status":   job.get("status"),
+        "progress": job.get("progress"),
+        "errors":   job.get("errors", []),
+        "has_html": bool(job.get("html")),
+        "html_len": len(job.get("html", "")),
+    }
