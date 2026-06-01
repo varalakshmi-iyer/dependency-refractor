@@ -62,10 +62,7 @@ class PRRequest(BaseModel):
     pr_description:    str
     selections_by_file: dict   # { gradle_path: [{ gav, is_unused, is_test_only, ... }] }
 
-
 def _make_clients(repo_url):
-    # type: (str) -> tuple
-    """Instantiate all clients from settings."""
     repo = repo_url.replace("https://github.com/", "").rstrip("/")
 
     snyk = SnykClient(
@@ -74,6 +71,8 @@ def _make_clients(repo_url):
         proxy_url=settings.PROXY_URL,
         ssl_verify=settings.ssl_verify,
         timeout=settings.SNYK_TIMEOUT,
+        max_retries=settings.SNYK_MAX_RETRIES,
+        retry_delay=settings.SNYK_RETRY_DELAY,
     )
     github = GitHubClient(
         pat=settings.GITHUB_PAT,
@@ -85,6 +84,7 @@ def _make_clients(repo_url):
     return snyk, github
 
 
+# ── Analysis ─────────────────────────────────────────────────────────────────────
 def _run_analysis(job_id, log_content, repo_url, branch_name, service_name):
     try:
         logger.info("[{}] Starting — log size: {} bytes".format(
@@ -135,7 +135,7 @@ def _run_analysis(job_id, log_content, repo_url, branch_name, service_name):
         # ── Vulnerability ──────────────────────────────────────────────────
         JOBS[job_id]["progress"] = "Running vulnerability scan..."
         try:
-            vuln_results = VulnerabilityAnalyzer(snyk).analyze(external)
+            vuln_results = VulnerabilityAnalyzer(snyk,max_workers=settings.SNYK_MAX_WORKERS,).analyze(external)
             logger.info("[{}] Vuln results: {}".format(job_id, len(vuln_results)))
         except Exception as e:
             logger.error("[{}] Vuln failed: {}".format(job_id, e), exc_info=True)
