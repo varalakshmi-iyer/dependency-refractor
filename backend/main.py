@@ -125,7 +125,7 @@ def _run_analysis(job_id, log_content, repo_url, branch_name, service_name):
         snyk, github = _make_clients(repo_url)
 
         try:
-            conflict_issues = ConflictAnalyzer(snyk).analyze(external)
+            conflict_issues = ConflictAnalyzer(snyk,max_workers=settings.SNYK_MAX_WORKERS).analyze(external)
             logger.info("[{}] Conflicts: {}".format(job_id, len(conflict_issues)))
         except Exception as e:
             logger.error("[{}] Conflict failed: {}".format(job_id, e), exc_info=True)

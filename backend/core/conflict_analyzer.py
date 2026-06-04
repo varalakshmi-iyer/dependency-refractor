@@ -9,9 +9,10 @@ from backend.core.snyk_client import SnykClient
 
 class ConflictAnalyzer:
 
-    def __init__(self, snyk_client):
+    def __init__(self, snyk_client, max_workers=3):
         # type: (SnykClient) -> None
         self.snyk = snyk_client
+        self.MAX_WORKERS = max_workers
 
     def analyze(self, deps):
         # type: (List[ResolvedDependency]) -> List[ConflictIssue]
