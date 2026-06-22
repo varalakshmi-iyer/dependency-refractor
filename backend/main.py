@@ -18,6 +18,9 @@ from backend.core.unused_analyzer import UnusedDependencyAnalyzer
 from backend.core.pr_submitter import PRSubmitter
 from backend.report.html_generator import generate_report
 import logging
+from backend.core.fix_delta_extractor import FixDeltaExtractor
+from backend.core.propagation_engine import PropagationEngine, PropagationResult
+from backend.core.repo_file_parser import RepoFileParser
 
 logging.basicConfig(
     level=logging.INFO,
@@ -42,7 +45,7 @@ app.add_middleware(
 # ── In-memory job store ────────────────────────────────────────────────────────
 # In production, replace with Redis or a database
 JOBS = {}   # type: dict
-
+PROPAGATION_JOBS = {}   # type: dict
 
 class AnalyzeRequest(BaseModel):
     repo_url:    str
@@ -313,4 +316,239 @@ def debug_job(job_id: str):
         "errors":   job.get("errors", []),
         "has_html": bool(job.get("html")),
         "html_len": len(job.get("html", "")),
+    }
+
+
+class PropagationScanRequest(BaseModel):
+    source_job_id:   str
+    target_branch:   str
+    repo_file_content: str    # raw text content of the ~ delimited file
+
+
+class PropagationSubmitRequest(BaseModel):
+    scan_job_id:     str
+    selected_repos:  List[str]    # list of repo_names to submit PRs for
+    pr_title:        Optional[str] = "chore(deps): propagate vulnerability fixes"
+    pr_description:  Optional[str] = ""
+
+
+@app.post("/propagate/scan")
+def propagate_scan(req: PropagationScanRequest, background_tasks: BackgroundTasks):
+    """
+    Step 1 — Scan target repos and compute applicable fixes.
+    Reads fix delta from a completed analysis job.
+    """
+    source_job = JOBS.get(req.source_job_id)
+    if not source_job:
+        raise HTTPException(status_code=404, detail="Source job not found")
+    if source_job.get("status") != "done":
+        raise HTTPException(status_code=400, detail="Source job not complete yet")
+
+    scan_job_id = str(uuid.uuid4())
+    PROPAGATION_JOBS[scan_job_id] = {
+        "status":   "running",
+        "progress": "Parsing repo list...",
+        "result":   None,
+        "errors":   [],
+    }
+
+    def run_scan():
+        try:
+            # Parse repo list
+            parser    = RepoFileParser()
+            repo_urls = parser.parse(req.repo_file_content)
+
+            if not repo_urls:
+                PROPAGATION_JOBS[scan_job_id] = {
+                    "status":   "error",
+                    "progress": "No valid repo URLs found in file",
+                    "result":   None,
+                    "errors":   ["No valid repo URLs found in file"],
+                }
+                return
+
+            PROPAGATION_JOBS[scan_job_id]["progress"] = (
+                "Extracting fix delta from source analysis..."
+            )
+
+            # Extract fix delta from source job
+            # We need the stored conflict and vuln results
+            conflict_issues = source_job.get("conflict_issues", [])
+            vuln_results    = source_job.get("vuln_results", [])
+            fix_deltas      = FixDeltaExtractor().extract(conflict_issues, vuln_results)
+
+            logger.info("Scan job {} — {} fix deltas, {} target repos".format(
+                scan_job_id, len(fix_deltas), len(repo_urls)
+            ))
+
+            PROPAGATION_JOBS[scan_job_id]["progress"] = (
+                "Scanning {} target repos...".format(len(repo_urls))
+            )
+
+            # Scan repos
+            engine = PropagationEngine(
+                github_pat=settings.GITHUB_PAT,
+                proxy_url=settings.PROXY_URL,
+                ssl_verify=settings.ssl_verify,
+                timeout=settings.SNYK_TIMEOUT,
+            )
+            result = engine.scan_repos(repo_urls, req.target_branch, fix_deltas)
+
+            PROPAGATION_JOBS[scan_job_id] = {
+                "status":      "done",
+                "progress":    "Scan complete",
+                "result":      result,
+                "fix_deltas":  fix_deltas,
+                "errors":      [],
+            }
+            logger.info("Propagation scan done — {} repos with fixes".format(
+                result.repos_with_fixes
+            ))
+
+        except Exception as e:
+            logger.error("Propagation scan failed: {}".format(e), exc_info=True)
+            PROPAGATION_JOBS[scan_job_id] = {
+                "status":   "error",
+                "progress": str(e),
+                "result":   None,
+                "errors":   [str(e)],
+            }
+
+    background_tasks.add_task(run_scan)
+    return {"scan_job_id": scan_job_id}
+
+
+@app.get("/propagate/scan/{scan_job_id}/status")
+def propagate_scan_status(scan_job_id: str):
+    """Poll propagation scan status."""
+    job = PROPAGATION_JOBS.get(scan_job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Scan job not found")
+
+    result   = job.get("result")
+    summaries = []
+
+    if result:
+        for s in result.repo_summaries:
+            summaries.append({
+                "repo_name":         s.repo_name,
+                "repo_url":          s.repo_url,
+                "branch":            s.branch,
+                "has_fixes":         s.has_fixes,
+                "applicable_count":  len(s.applicable_fixes),
+                "already_safe_count":len(s.already_safe),
+                "not_present_count": len(s.not_present),
+                "error":             s.error,
+                "status":            s.status,
+                "pr_url":            s.pr_url,
+                "applicable_fixes": [
+                    {
+                        "ga":           f.ga,
+                        "from_version": f.from_version,
+                        "to_version":   f.to_version,
+                        "reason":       f.reason,
+                        "cve_ids":      f.cve_ids,
+                    }
+                    for f in s.applicable_fixes
+                ],
+            })
+
+    return {
+        "status":    job["status"],
+        "progress":  job.get("progress", ""),
+        "errors":    job.get("errors", []),
+        "summaries": summaries,
+        "total_repos":      result.total_repos      if result else 0,
+        "repos_with_fixes": result.repos_with_fixes if result else 0,
+    }
+
+
+@app.post("/propagate/submit")
+def propagate_submit(req: PropagationSubmitRequest, background_tasks: BackgroundTasks):
+    """
+    Step 2 — Submit PRs to selected repos.
+    """
+    job = PROPAGATION_JOBS.get(req.scan_job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Scan job not found")
+    if job.get("status") != "done":
+        raise HTTPException(status_code=400, detail="Scan not complete yet")
+
+    result = job.get("result")
+    if not result:
+        raise HTTPException(status_code=400, detail="No scan result found")
+
+    submit_job_id = str(uuid.uuid4())
+    PROPAGATION_JOBS[submit_job_id] = {
+        "status":   "running",
+        "progress": "Submitting PRs...",
+        "pr_urls":  {},
+        "errors":   [],
+    }
+
+    def run_submit():
+        engine = PropagationEngine(
+            github_pat=settings.GITHUB_PAT,
+            proxy_url=settings.PROXY_URL,
+            ssl_verify=settings.ssl_verify,
+            timeout=settings.SNYK_TIMEOUT,
+        )
+        pr_urls = {}
+        errors  = []
+        total   = len(req.selected_repos)
+
+        for idx, repo_name in enumerate(req.selected_repos, 1):
+            PROPAGATION_JOBS[submit_job_id]["progress"] = (
+                "Submitting PR {}/{} — {}".format(idx, total, repo_name)
+            )
+            # Find summary for this repo
+            summary = next(
+                (s for s in result.repo_summaries if s.repo_name == repo_name),
+                None,
+            )
+            if not summary or not summary.has_fixes:
+                logger.warning("No fixes for repo: {}".format(repo_name))
+                continue
+
+            try:
+                pr_url = engine.submit_pr(
+                    summary=summary,
+                    pr_branch_prefix=settings.PROPAGATE_PR_PREFIX,
+                    pr_title=req.pr_title,
+                    pr_description=req.pr_description,
+                )
+                pr_urls[repo_name] = pr_url
+                summary.pr_url = pr_url
+                summary.status = "submitted"
+                logger.info("PR submitted for {}: {}".format(repo_name, pr_url))
+
+            except Exception as e:
+                logger.error("PR failed for {}: {}".format(repo_name, e), exc_info=True)
+                errors.append("PR failed for {}: {}".format(repo_name, str(e)))
+                summary.status = "error"
+                summary.error  = str(e)
+
+        PROPAGATION_JOBS[submit_job_id] = {
+            "status":   "done",
+            "progress": "Complete — {} PR(s) submitted".format(len(pr_urls)),
+            "pr_urls":  pr_urls,
+            "errors":   errors,
+        }
+        logger.info("Propagation submit done — {} PRs".format(len(pr_urls)))
+
+    background_tasks.add_task(run_submit)
+    return {"submit_job_id": submit_job_id}
+
+
+@app.get("/propagate/submit/{submit_job_id}/status")
+def propagate_submit_status(submit_job_id: str):
+    """Poll PR submission status."""
+    job = PROPAGATION_JOBS.get(submit_job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Submit job not found")
+    return {
+        "status":   job["status"],
+        "progress": job.get("progress", ""),
+        "pr_urls":  job.get("pr_urls", {}),
+        "errors":   job.get("errors", []),
     }

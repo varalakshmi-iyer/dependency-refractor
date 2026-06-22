@@ -3,17 +3,22 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 class Settings:
-    SNYK_TOKEN:       str = os.getenv("SNYK_TOKEN", "")
-    SNYK_ORG_ID:      str = os.getenv("SNYK_ORG_ID", "")
-    GITHUB_PAT:       str = os.getenv("GITHUB_PAT", "")
-    PROXY_URL:        str = os.getenv("PROXY_URL", "")
-    SSL_CERT:         str = os.getenv("SSL_CERT", "true")
-    SNYK_TIMEOUT:     int = int(os.getenv("SNYK_TIMEOUT", "90"))
-    SNYK_MAX_WORKERS: int = int(os.getenv("SNYK_MAX_WORKERS", "3"))
-    SNYK_MAX_RETRIES: int = int(os.getenv("SNYK_MAX_RETRIES", "2"))
-    SNYK_RETRY_DELAY: int = int(os.getenv("SNYK_RETRY_DELAY", "3"))
-    BACKEND_URL:      str = os.getenv("BACKEND_URL", "http://localhost:8000")
+    SNYK_TOKEN:              str = os.getenv("SNYK_TOKEN", "")
+    SNYK_ORG_ID:             str = os.getenv("SNYK_ORG_ID", "")
+    GITHUB_PAT:              str = os.getenv("GITHUB_PAT", "")
+    PROXY_URL:               str = os.getenv("PROXY_URL", "")
+    SSL_CERT:                str = os.getenv("SSL_CERT", "true")
+    SNYK_TIMEOUT:            int = int(os.getenv("SNYK_TIMEOUT", "90"))
+    SNYK_MAX_WORKERS:        int = int(os.getenv("SNYK_MAX_WORKERS", "3"))
+    SNYK_MAX_RETRIES:        int = int(os.getenv("SNYK_MAX_RETRIES", "2"))
+    SNYK_RETRY_DELAY:        int = int(os.getenv("SNYK_RETRY_DELAY", "3"))
+    BACKEND_URL:             str = os.getenv("BACKEND_URL", "http://localhost:8000")
+    TARGET_REPOS_BRANCH:     str = os.getenv("TARGET_REPOS_BRANCH", "main")
+    PROPAGATE_PR_PREFIX:     str = os.getenv(
+        "PROPAGATE_PR_BRANCH_PREFIX", "dependency-refractor/propagate-fixes"
+    )
 
     @property
     def ssl_verify(self):
@@ -22,6 +27,7 @@ class Settings:
             return True
         if self.SSL_CERT.lower() == "false":
             return False
-        return self.SSL_CERT   # path to .pem
+        return self.SSL_CERT
+
 
 settings = Settings()
