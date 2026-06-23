@@ -2,7 +2,6 @@ import time
 import base64
 import requests
 import streamlit as st
-import streamlit.components.v1 as components
 
 BACKEND_URL = "http://localhost:8000"
 
@@ -22,7 +21,6 @@ st.markdown("""
   }
   [data-testid="stHeader"] { background: transparent; }
   [data-testid="stSidebar"] { background: #0d1117; }
-
   #MainMenu, footer, header { visibility: hidden; }
 
   .dr-card {
@@ -32,7 +30,6 @@ st.markdown("""
     padding: 24px;
     margin-bottom: 16px;
   }
-
   .stTextInput > div > div > input {
     background: #0d1117 !important;
     border: 1px solid #334155 !important;
@@ -49,7 +46,6 @@ st.markdown("""
     letter-spacing: 0.08em !important;
     text-transform: uppercase !important;
   }
-
   .stButton > button {
     background: linear-gradient(135deg, #1d4ed8, #7c3aed) !important;
     color: white !important;
@@ -63,17 +59,14 @@ st.markdown("""
     transition: opacity 0.2s !important;
   }
   .stButton > button:hover { opacity: 0.85 !important; }
-
   .reset-btn > button {
     background: #0d1117 !important;
     border: 1px solid #334155 !important;
     color: #94a3b8 !important;
   }
-
   .stProgress > div > div {
     background: linear-gradient(90deg, #1d4ed8, #7c3aed) !important;
   }
-
   .stRadio > div { gap: 8px !important; }
   .stRadio > div > label {
     background: #0d1117 !important;
@@ -83,16 +76,13 @@ st.markdown("""
     color: #e2e8f0 !important;
     cursor: pointer !important;
   }
-
   [data-testid="stFileUploader"] {
     background: #0d1117 !important;
     border: 1px dashed #334155 !important;
     border-radius: 8px !important;
   }
-
   hr { border-color: #1e293b !important; }
   .stAlert { border-radius: 8px !important; }
-
   [data-testid="stDownloadButton"] > button {
     background: #052e16 !important;
     border: 1px solid #166534 !important;
@@ -100,7 +90,6 @@ st.markdown("""
     border-radius: 8px !important;
     font-weight: 700 !important;
   }
-
   .stTabs [data-baseweb="tab-list"] {
     background: #0d1117 !important;
     border-bottom: 1px solid #1e293b !important;
@@ -119,11 +108,7 @@ st.markdown("""
     border-bottom-color: #3b82f6 !important;
     background: transparent !important;
   }
-
-  .stCheckbox > label {
-    color: #e2e8f0 !important;
-  }
-
+  .stCheckbox > label { color: #e2e8f0 !important; }
   .stExpander {
     background: #0d1117 !important;
     border: 1px solid #1e293b !important;
@@ -135,7 +120,7 @@ st.markdown("""
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 def _stat_card(icon, value, label, color):
-    # type: (str, int, str, str) -> str
+    # type: (str, object, str, str) -> str
     return (
         '<div style="background:#0d1117;border:1px solid #1e293b;'
         'border-radius:12px;padding:16px;text-align:center;">'
@@ -200,7 +185,6 @@ def render_input_form():
 
     # ── Repository ─────────────────────────────────────────────────────────────
     _section_title("&#128279; Repository")
-
     repo_url = st.text_input(
         "GitHub Repository URL",
         placeholder="https://github.com/your-org/your-repo",
@@ -221,7 +205,6 @@ def render_input_form():
 
     # ── Build Log ──────────────────────────────────────────────────────────────
     _section_title("&#128196; Build Log Source")
-
     log_source = st.radio(
         "How would you like to provide the build log?",
         options=["Build ID (OC Client)", "Upload File"],
@@ -256,7 +239,6 @@ def render_input_form():
 
     # ── PR Settings ────────────────────────────────────────────────────────────
     _section_title("&#128295; PR Settings")
-
     pr_branch = st.text_input(
         "PR Branch Name (for unused dep removal)",
         value="dependency-refractor/remove-unused",
@@ -265,47 +247,20 @@ def render_input_form():
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── Fix Propagation ────────────────────────────────────────────────────────
-    _section_title("&#128257; Fix Propagation (Optional)")
-
-    st.markdown(
-        '<div style="font-size:12px;color:#475569;margin-bottom:12px;">'
-        'Upload a <code>~</code> delimited <code>.txt</code> file of GitHub repo URLs '
-        'to propagate vulnerability fixes across multiple services after analysis.'
-        '</div>',
-        unsafe_allow_html=True,
-    )
-
-    target_repos_file = st.file_uploader(
-        "Target Repos File (.txt) — ~ delimited GitHub URLs",
-        type=["txt"],
-        key="target_repos_file",
-    )
-    target_repos_branch = st.text_input(
-        "Target Repos Branch",
-        value="main",
-        key="target_repos_branch",
-    )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # ── Analyze Button ─────────────────────────────────────────────────────────
     analyze_clicked = st.button("&#128270;  Analyze", key="analyze_btn")
 
     st.markdown('</div>', unsafe_allow_html=True)
 
     return {
-        "repo_url":            repo_url,
-        "branch_name":         branch_name,
-        "service_name":        service_name,
-        "log_source":          log_source,
-        "build_id":            build_id,
-        "namespace":           namespace,
-        "log_file":            log_file,
-        "pr_branch":           pr_branch,
-        "target_repos_file":   target_repos_file,
-        "target_repos_branch": target_repos_branch,
-        "clicked":             analyze_clicked,
+        "repo_url":     repo_url,
+        "branch_name":  branch_name,
+        "service_name": service_name,
+        "log_source":   log_source,
+        "build_id":     build_id,
+        "namespace":    namespace,
+        "log_file":     log_file,
+        "pr_branch":    pr_branch,
+        "clicked":      analyze_clicked,
     }
 
 
@@ -359,16 +314,14 @@ def submit_analysis(inputs):
                 },
                 timeout=30,
             )
-
         resp.raise_for_status()
         return resp.json()["job_id"]
-
     except Exception as e:
         st.error("Failed to start analysis: {}".format(e))
         return ""
 
 
-# ── Poll Job Status ────────────────────────────────────────────────────────────
+# ── Poll Job ───────────────────────────────────────────────────────────────────
 def poll_job(job_id):
     # type: (str) -> dict
     try:
@@ -393,7 +346,24 @@ def fetch_report(job_id):
         resp.raise_for_status()
         return resp.text
     except Exception as e:
-        return "<h1 style='color:#f87171;font-family:monospace;padding:40px;'>Error fetching report: {}</h1>".format(e)
+        return (
+            "<h1 style='color:#f87171;font-family:monospace;padding:40px;'>"
+            "Error fetching report: {}</h1>".format(e)
+        )
+
+
+# ── Fetch Vuln Data ────────────────────────────────────────────────────────────
+def fetch_vuln_data(job_id):
+    # type: (str) -> dict
+    try:
+        resp = requests.get(
+            "{}/job/{}/vulns".format(BACKEND_URL, job_id),
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        return {"enriched_vulns": [], "error": str(e)}
 
 
 # ── Progress Screen ────────────────────────────────────────────────────────────
@@ -450,15 +420,13 @@ def render_progress(job_id):
                     "Analysis completed with {} warning(s). "
                     "Some sections may be incomplete.".format(len(errors))
                 )
-                for err in errors:
-                    st.caption("⚠️ {}".format(err))
             st.session_state["report_html"] = fetch_report(job_id)
             st.session_state["view"]        = "report"
             st.rerun()
             break
 
         elif status == "error":
-            st.error("❌ Analysis failed: {}".format(progress))
+            st.error("Analysis failed: {}".format(progress))
             st.markdown(
                 '<div style="font-family:monospace;font-size:12px;color:#94a3b8;'
                 'padding:16px;background:#0d1117;border:1px solid #1e293b;'
@@ -477,6 +445,294 @@ def render_progress(job_id):
         time.sleep(2)
 
 
+# ── Tab 2: Vulnerability Fix PR ────────────────────────────────────────────────
+def render_vuln_fix_tab(source_job_id, repo_url, branch_name):
+    # type: (str, str, str) -> None
+
+    st.markdown(
+        '<div style="font-size:14px;font-weight:700;color:#64748b;'
+        'letter-spacing:0.1em;text-transform:uppercase;margin-bottom:20px;">'
+        '&#9888;&#65039; VULNERABILITY FIX PR</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── Load vuln data once ────────────────────────────────────────────────────
+    if "vuln_data" not in st.session_state:
+        with st.spinner("Loading vulnerability data..."):
+            data = fetch_vuln_data(source_job_id)
+            st.session_state["vuln_data"]         = data.get("enriched_vulns", [])
+            st.session_state["vuln_repo_url"]     = data.get("repo_url", repo_url)
+            st.session_state["vuln_branch_name"]  = data.get("branch_name", branch_name)
+
+    vuln_data   = st.session_state.get("vuln_data", [])
+    vuln_repo   = st.session_state.get("vuln_repo_url", repo_url)
+    vuln_branch = st.session_state.get("vuln_branch_name", branch_name)
+
+    vulnerable = [
+        d for d in vuln_data
+        if d.get("is_vulnerable") and d.get("vulnerabilities")
+    ]
+
+    if not vulnerable:
+        st.markdown(
+            '<div style="text-align:center;padding:80px 40px;color:#4ade80;">'
+            '<div style="font-size:56px;">&#128737;</div>'
+            '<div style="font-size:20px;font-weight:700;margin-top:16px;">'
+            'No vulnerable dependencies found</div>'
+            '<div style="font-size:14px;color:#64748b;margin-top:8px;">'
+            'All dependencies are clean according to Snyk</div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    # ── PR already raised — show result + propagate button ────────────────────
+    pr_job_id = st.session_state.get("vuln_pr_job_id")
+    pr_done   = st.session_state.get("vuln_pr_done", False)
+    pr_url    = st.session_state.get("vuln_pr_url", "")
+
+    if pr_job_id and not pr_done:
+        job_data = poll_job(pr_job_id)
+        if job_data.get("status") == "running":
+            st.info("&#9203; Creating PR on source repo...")
+            time.sleep(2)
+            st.rerun()
+        elif job_data.get("status") == "done":
+            st.session_state["vuln_pr_done"]    = True
+            st.session_state["vuln_pr_url"]     = job_data.get("pr_url", "")
+            st.session_state["vuln_fix_deltas"] = job_data.get("fix_deltas", [])
+            st.rerun()
+        elif job_data.get("status") == "error":
+            st.error("PR creation failed: {}".format(
+                job_data.get("progress", "Unknown error")
+            ))
+            st.session_state.pop("vuln_pr_job_id", None)
+            st.rerun()
+
+    if pr_done and pr_url:
+        st.success("&#10003; Fix PR raised successfully!")
+        st.markdown(
+            '&#128279; [View PR on GitHub]({})'.format(pr_url),
+        )
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        st.markdown(
+            '<div style="background:#0d1117;border:1px solid #1e3a5f;'
+            'border-radius:12px;padding:20px 24px;margin-bottom:20px;">'
+            '<div style="font-size:14px;font-weight:700;color:#93c5fd;margin-bottom:8px;">'
+            '&#128257; Propagate this fix to other repos</div>'
+            '<div style="font-size:13px;color:#475569;">'
+            'The same vulnerable dependencies may exist across other services. '
+            'Click below to propagate these version fixes to other repositories.'
+            '</div></div>',
+            unsafe_allow_html=True,
+        )
+
+        if st.button(
+            "&#128257; Propagate to Other Repos",
+            key="goto_propagation_btn",
+        ):
+            st.session_state["trigger_propagation"] = True
+            st.rerun()
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown('<div class="reset-btn">', unsafe_allow_html=True)
+        if st.button("&#8635; Reset Fix PR", key="reset_vuln_pr"):
+            for k in ["vuln_pr_job_id", "vuln_pr_done", "vuln_pr_url",
+                      "vuln_fix_deltas", "trigger_propagation", "vuln_data"]:
+                st.session_state.pop(k, None)
+            st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+        return
+
+    # ── PR Config ──────────────────────────────────────────────────────────────
+    st.markdown(
+        '<div style="font-size:13px;color:#475569;margin-bottom:20px;">'
+        'Review vulnerable dependencies below. Safe versions are pre-filled '
+        'from Snyk. Edit any version before raising the PR. '
+        'Only direct dependencies declared in <code>build.gradle</code> are shown.'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    col_branch, col_title = st.columns(2)
+    with col_branch:
+        pr_branch = st.text_input(
+            "PR Branch Name",
+            value="dependency-refractor/vuln-fixes",
+            key="vuln_pr_branch",
+        )
+    with col_title:
+        pr_title = st.text_input(
+            "PR Title",
+            value="chore(deps): fix vulnerable dependency versions",
+            key="vuln_pr_title",
+        )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Column headers ─────────────────────────────────────────────────────────
+    st.markdown(
+        '<div style="display:grid;'
+        'grid-template-columns:2fr 1fr 1fr 1fr 2fr;'
+        'gap:12px;padding:10px 14px;'
+        'background:#0a0f1a;border-radius:8px 8px 0 0;'
+        'border:1px solid #1e293b;font-size:10px;font-weight:700;'
+        'color:#475569;letter-spacing:0.1em;">'
+        '<div>DEPENDENCY</div>'
+        '<div>CURRENT</div>'
+        '<div>SEVERITY</div>'
+        '<div>CVEs</div>'
+        '<div>FIX VERSION (EDITABLE)</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    SEV_COLOR = {
+        "critical": "#ff4444",
+        "high":     "#ff8c00",
+        "medium":   "#ffd700",
+        "low":      "#4fc3f7",
+    }
+
+    edited_fixes = []
+    order_map    = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+
+    for idx, dep in enumerate(vulnerable):
+        ga          = "{}:{}".format(dep["group"], dep["artifact"])
+        current_ver = dep["version"]
+        safe_ver    = dep.get("safe_version") or current_ver
+        vulns       = dep.get("vulnerabilities", [])
+        cve_ids     = [v["cve_id"] for v in vulns]
+        worst       = (
+            sorted(vulns, key=lambda v: order_map.get(v["severity"], 9))[0]
+            if vulns else {}
+        )
+        worst_sev   = worst.get("severity", "unknown")
+        sev_color   = SEV_COLOR.get(worst_sev, "#94a3b8")
+
+        col1, col2, col3, col4, col5 = st.columns([2, 1, 1, 1, 2])
+
+        with col1:
+            st.markdown(
+                '<div style="padding:12px 4px;">'
+                '<code style="font-size:12px;color:#e2e8f0;">{}</code>'
+                '</div>'.format(ga),
+                unsafe_allow_html=True,
+            )
+
+        with col2:
+            st.markdown(
+                '<div style="padding:12px 4px;">'
+                '<code style="font-size:12px;color:#f87171;">{}</code>'
+                '</div>'.format(current_ver),
+                unsafe_allow_html=True,
+            )
+
+        with col3:
+            st.markdown(
+                '<div style="padding:12px 4px;">'
+                '<span style="padding:2px 8px;border-radius:4px;'
+                'font-size:10px;font-weight:800;color:{col};">'
+                '{sev}</span>'
+                '</div>'.format(col=sev_color, sev=worst_sev.upper()),
+                unsafe_allow_html=True,
+            )
+
+        with col4:
+            cve_display = "<br>".join(cve_ids[:2])
+            if len(cve_ids) > 2:
+                cve_display += "<br>+{} more".format(len(cve_ids) - 2)
+            st.markdown(
+                '<div style="padding:12px 4px;font-size:11px;color:#94a3b8;">'
+                '{}</div>'.format(cve_display),
+                unsafe_allow_html=True,
+            )
+
+        with col5:
+            new_version = st.text_input(
+                "",
+                value=safe_ver,
+                key="fix_ver_{}_{}".format(
+                    idx,
+                    ga.replace(":", "_").replace(".", "_").replace("-", "_"),
+                ),
+                label_visibility="collapsed",
+            )
+
+        if new_version and new_version.strip() != current_ver:
+            edited_fixes.append({
+                "ga":           ga,
+                "group":        dep["group"],
+                "artifact":     dep["artifact"],
+                "from_version": current_ver,
+                "to_version":   new_version.strip(),
+                "cve_ids":      cve_ids,
+                "reason":       "Snyk: {} CVE(s) — {}".format(
+                    len(cve_ids),
+                    ", ".join(cve_ids[:2]),
+                ),
+            })
+
+        st.markdown(
+            '<hr style="border-color:#0d1117;margin:0;">',
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Raise PR button ────────────────────────────────────────────────────────
+    if not edited_fixes:
+        st.markdown(
+            '<div style="color:#475569;font-size:13px;">'
+            'No version changes detected. Edit at least one fix version '
+            'above to enable PR creation.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    st.markdown(
+        '<div style="font-size:13px;color:#94a3b8;margin-bottom:12px;">'
+        '<strong style="color:#e2e8f0;">{}</strong> version fix(es) ready to commit'
+        '</div>'.format(len(edited_fixes)),
+        unsafe_allow_html=True,
+    )
+
+    for fix in edited_fixes:
+        st.markdown(
+            '`{}` &nbsp;'
+            '<span style="color:#f87171;">{}</span>'
+            ' &#10145; '
+            '<span style="color:#4ade80;">{}</span>'.format(
+                fix["ga"],
+                fix["from_version"],
+                fix["to_version"],
+            ),
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    if st.button("&#128640; Raise Fix PR on Source Repo", key="raise_vuln_pr_btn"):
+        try:
+            resp = requests.post(
+                "{}/vuln/raise-pr".format(BACKEND_URL),
+                json={
+                    "repo_url":    vuln_repo,
+                    "branch_name": vuln_branch,
+                    "pr_branch":   pr_branch,
+                    "pr_title":    pr_title,
+                    "fixes":       edited_fixes,
+                },
+                timeout=30,
+            )
+            resp.raise_for_status()
+            st.session_state["vuln_pr_job_id"] = resp.json()["job_id"]
+            st.rerun()
+        except Exception as e:
+            st.error("Failed to raise PR: {}".format(e))
+
+
 # ── Propagation Helpers ────────────────────────────────────────────────────────
 def _poll_propagation_scan(scan_job_id):
     # type: (str) -> dict
@@ -488,7 +744,10 @@ def _poll_propagation_scan(scan_job_id):
         resp.raise_for_status()
         return resp.json()
     except Exception as e:
-        return {"status": "error", "progress": str(e), "summaries": [], "errors": [str(e)]}
+        return {
+            "status": "error", "progress": str(e),
+            "summaries": [], "errors": [str(e)],
+        }
 
 
 def _poll_propagation_submit(submit_job_id):
@@ -501,29 +760,18 @@ def _poll_propagation_submit(submit_job_id):
         resp.raise_for_status()
         return resp.json()
     except Exception as e:
-        return {"status": "error", "progress": str(e), "pr_urls": {}, "errors": [str(e)]}
+        return {
+            "status": "error", "progress": str(e),
+            "pr_urls": {}, "errors": [str(e)],
+        }
 
 
-# ── Propagation Tab ────────────────────────────────────────────────────────────
-def render_propagation_tab(source_job_id):
-    # type: (str) -> None
+# ── Tab 3: Fix Propagation ─────────────────────────────────────────────────────
+def render_propagation_tab(source_job_id, vuln_fix_deltas=None):
+    # type: (str, list) -> None
 
-    target_repos_content = st.session_state.get("target_repos_content", "")
-    target_repos_branch  = st.session_state.get("target_repos_branch", "main")
-
-    if not target_repos_content:
-        st.markdown(
-            '<div style="text-align:center;padding:60px 40px;color:#475569;">'
-            '<div style="font-size:48px;margin-bottom:16px;">&#128196;</div>'
-            '<div style="font-size:18px;font-weight:700;color:#64748b;">'
-            'No target repos file provided</div>'
-            '<div style="font-size:13px;margin-top:8px;">'
-            'Upload a <code>~</code> delimited <code>.txt</code> file of GitHub repo URLs '
-            'on the input screen to enable cross-repo fix propagation.'
-            '</div></div>',
-            unsafe_allow_html=True,
-        )
-        return
+    if vuln_fix_deltas is None:
+        vuln_fix_deltas = []
 
     st.markdown(
         '<div style="font-size:14px;font-weight:700;color:#64748b;'
@@ -532,39 +780,100 @@ def render_propagation_tab(source_job_id):
         unsafe_allow_html=True,
     )
 
-    # ── Step 1: Trigger scan ───────────────────────────────────────────────────
+    # ── Banner when coming from vuln fix PR ────────────────────────────────────
+    if vuln_fix_deltas:
+        fixes_summary = " &nbsp;|&nbsp; ".join(
+            '<code>{}</code> &#10145; '
+            '<span style="color:#4ade80;">{}</span>'.format(
+                f["ga"], f["to_version"]
+            )
+            for f in vuln_fix_deltas[:3]
+        )
+        if len(vuln_fix_deltas) > 3:
+            fixes_summary += " &nbsp;|&nbsp; +{} more".format(
+                len(vuln_fix_deltas) - 3
+            )
+        st.markdown(
+            '<div style="background:#0a1a0a;border:1px solid #166534;'
+            'border-radius:8px;padding:12px 16px;margin-bottom:20px;">'
+            '<div style="font-size:11px;font-weight:700;color:#4ade80;'
+            'letter-spacing:0.08em;margin-bottom:6px;">'
+            'PROPAGATING FROM VULN FIX PR</div>'
+            '<div style="font-size:12px;color:#86efac;">'
+            + fixes_summary +
+            '</div></div>',
+            unsafe_allow_html=True,
+        )
+
     scan_job_id = st.session_state.get("propagation_scan_job_id")
 
+    # ── Step 1: collect inputs and trigger scan ────────────────────────────────
     if not scan_job_id:
         st.markdown(
             '<div style="background:#0d1117;border:1px solid #1e293b;'
             'border-radius:12px;padding:24px;margin-bottom:20px;">'
-            '<div style="font-size:14px;color:#e2e8f0;margin-bottom:8px;font-weight:600;">'
-            'Ready to propagate fixes</div>'
-            '<div style="font-size:13px;color:#475569;margin-bottom:12px;">'
-            'Scan all target repos to find which ones have the same vulnerable '
-            'dependencies and need the fixes from your source analysis.'
-            '</div>'
-            '<div style="font-size:12px;color:#64748b;">'
-            'Target branch: <code style="color:#93c5fd;">'
-            + target_repos_branch +
-            '</code></div></div>',
+            '<div style="font-size:14px;color:#e2e8f0;'
+            'margin-bottom:8px;font-weight:600;">'
+            'Propagate fixes to other services</div>'
+            '<div style="font-size:13px;color:#475569;margin-bottom:16px;">'
+            'Upload a <code>~</code> delimited <code>.txt</code> file of GitHub '
+            'repo URLs. The tool will scan each repo, find matching vulnerable '
+            'dependencies, and raise a targeted fix PR per repo.'
+            '</div></div>',
             unsafe_allow_html=True,
         )
 
+        target_repos_file = st.file_uploader(
+            "Target Repos File (.txt) — ~ delimited GitHub URLs",
+            type=["txt"],
+            key="target_repos_file_upload",
+        )
+        target_repos_branch = st.text_input(
+            "Target Repos Branch",
+            value="main",
+            key="target_repos_branch_input",
+            help="Branch to read build.gradle from in each target repo",
+        )
+
+        if not target_repos_file:
+            st.markdown(
+                '<div style="color:#475569;font-size:12px;margin-top:8px;">'
+                'Upload a .txt file above to enable scanning.</div>',
+                unsafe_allow_html=True,
+            )
+            return
+
         if st.button("&#128270; Scan Target Repos", key="scan_repos_btn"):
             try:
+                content = target_repos_file.read().decode("utf-8", errors="replace")
+                if not content.strip():
+                    st.error("The uploaded file is empty.")
+                    return
+
+                payload = {
+                    "target_branch":     target_repos_branch or "main",
+                    "repo_file_content": content,
+                }
+
+                # Use fix deltas from vuln PR if available,
+                # otherwise fall back to source analysis job
+                if vuln_fix_deltas:
+                    payload["fix_deltas_override"] = vuln_fix_deltas
+                else:
+                    payload["source_job_id"] = source_job_id
+
                 resp = requests.post(
                     "{}/propagate/scan".format(BACKEND_URL),
-                    json={
-                        "source_job_id":     source_job_id,
-                        "target_branch":     target_repos_branch,
-                        "repo_file_content": target_repos_content,
-                    },
+                    json=payload,
                     timeout=30,
                 )
                 resp.raise_for_status()
-                st.session_state["propagation_scan_job_id"] = resp.json()["scan_job_id"]
+                st.session_state["propagation_scan_job_id"]  = (
+                    resp.json()["scan_job_id"]
+                )
+                st.session_state["target_repos_branch_used"] = (
+                    target_repos_branch or "main"
+                )
                 st.rerun()
             except Exception as e:
                 st.error("Scan request failed: {}".format(e))
@@ -574,16 +883,20 @@ def render_propagation_tab(source_job_id):
     scan_data = _poll_propagation_scan(scan_job_id)
 
     if scan_data["status"] == "running":
-        st.info("&#9203; {}".format(scan_data.get("progress", "Scanning repos...")))
+        st.info("&#9203; {}".format(
+            scan_data.get("progress", "Scanning repos...")
+        ))
         time.sleep(2)
         st.rerun()
         return
 
     if scan_data["status"] == "error":
-        st.error("Scan failed: {}".format(scan_data.get("progress", "Unknown error")))
+        st.error("Scan failed: {}".format(
+            scan_data.get("progress", "Unknown error")
+        ))
         st.markdown('<div class="reset-btn">', unsafe_allow_html=True)
         if st.button("Reset Propagation", key="reset_prop_error"):
-            del st.session_state["propagation_scan_job_id"]
+            st.session_state.pop("propagation_scan_job_id", None)
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
         return
@@ -592,33 +905,42 @@ def render_propagation_tab(source_job_id):
     summaries        = scan_data.get("summaries", [])
     total_repos      = scan_data.get("total_repos", 0)
     repos_with_fixes = scan_data.get("repos_with_fixes", 0)
-    already_safe     = sum(1 for s in summaries if not s["has_fixes"] and not s.get("error"))
+    already_safe     = sum(
+        1 for s in summaries if not s["has_fixes"] and not s.get("error")
+    )
     errors_count     = sum(1 for s in summaries if s.get("error"))
+    target_branch    = st.session_state.get("target_repos_branch_used", "main")
 
-    # Stats
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.markdown(_stat_card("&#128196;", total_repos, "TOTAL REPOS", "#e2e8f0"),
-                    unsafe_allow_html=True)
+        st.markdown(
+            _stat_card("&#128196;", total_repos, "TOTAL REPOS", "#e2e8f0"),
+            unsafe_allow_html=True,
+        )
     with col2:
-        st.markdown(_stat_card("&#9889;", repos_with_fixes, "NEED FIXES",
-                               "#ff8c00" if repos_with_fixes > 0 else "#4ade80"),
-                    unsafe_allow_html=True)
+        st.markdown(
+            _stat_card("&#9889;", repos_with_fixes, "NEED FIXES",
+                       "#ff8c00" if repos_with_fixes > 0 else "#4ade80"),
+            unsafe_allow_html=True,
+        )
     with col3:
-        st.markdown(_stat_card("&#10003;", already_safe, "ALREADY SAFE", "#4ade80"),
-                    unsafe_allow_html=True)
+        st.markdown(
+            _stat_card("&#10003;", already_safe, "ALREADY SAFE", "#4ade80"),
+            unsafe_allow_html=True,
+        )
     with col4:
-        st.markdown(_stat_card("&#9888;", errors_count, "ERRORS",
-                               "#ff4444" if errors_count > 0 else "#4ade80"),
-                    unsafe_allow_html=True)
+        st.markdown(
+            _stat_card("&#9888;", errors_count, "ERRORS",
+                       "#ff4444" if errors_count > 0 else "#4ade80"),
+            unsafe_allow_html=True,
+        )
 
     st.markdown("<br>", unsafe_allow_html=True)
 
     if not summaries:
-        st.info("No repos found in the scan result. Check the target repos file format.")
+        st.info("No repos found in scan result. Check the target repos file format.")
         return
 
-    # ── Repo selection ─────────────────────────────────────────────────────────
     st.markdown(
         '<div style="font-size:13px;font-weight:700;color:#94a3b8;'
         'letter-spacing:0.08em;text-transform:uppercase;margin-bottom:12px;">'
@@ -640,9 +962,15 @@ def render_propagation_tab(source_job_id):
 
         with col_check:
             already_submitted = bool(pr_url)
+            safe_key = (
+                repo_name
+                .replace("/", "_")
+                .replace("-", "_")
+                .replace(".", "_")
+            )
             checked = st.checkbox(
                 "",
-                key="repo_check_{}".format(repo_name.replace("/", "_").replace("-", "_")),
+                key="repo_chk_{}".format(safe_key),
                 value=has_fixes and not already_submitted,
                 disabled=not has_fixes or bool(error) or already_submitted,
             )
@@ -659,6 +987,11 @@ def render_propagation_tab(source_job_id):
             else:
                 status_icon, status_color = "&#10003;", "#4ade80"
 
+            error_row = (
+                '<div style="font-size:11px;color:#f87171;margin-top:2px;">'
+                'Error: ' + str(error) + '</div>'
+            ) if error else ""
+
             st.markdown(
                 '<div style="padding:12px 0;">'
                 '<div style="display:flex;align-items:center;gap:8px;">'
@@ -674,11 +1007,10 @@ def render_propagation_tab(source_job_id):
                 '</div>'.format(
                     status_color, status_icon,
                     repo_name,
-                    summary.get("branch", target_repos_branch),
+                    summary.get("branch", target_branch),
                     app_count,
                     safe_count,
-                    '<div style="font-size:11px;color:#f87171;margin-top:2px;">'
-                    'Error: ' + str(error) + '</div>' if error else "",
+                    error_row,
                 ),
                 unsafe_allow_html=True,
             )
@@ -718,7 +1050,7 @@ def render_propagation_tab(source_job_id):
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── Submit / status ────────────────────────────────────────────────────────
+    # ── Submit / poll ──────────────────────────────────────────────────────────
     submit_job_id = st.session_state.get("propagation_submit_job_id")
 
     if submit_job_id:
@@ -736,21 +1068,21 @@ def render_propagation_tab(source_job_id):
             submit_errors = submit_data.get("errors", [])
 
             if pr_urls:
-                st.success("&#10003; {} PR(s) submitted successfully!".format(len(pr_urls)))
-                for repo_name, url in pr_urls.items():
+                st.success(
+                    "&#10003; {} PR(s) submitted successfully!".format(len(pr_urls))
+                )
+                for rname, url in pr_urls.items():
                     st.markdown(
-                        '&#128279; **{}** — [View PR]({})'.format(repo_name, url)
+                        '&#128279; **{}** — [View PR]({})'.format(rname, url)
                     )
-
             for err in submit_errors:
                 st.warning("&#9888; {}".format(err))
 
             st.markdown("<br>", unsafe_allow_html=True)
             st.markdown('<div class="reset-btn">', unsafe_allow_html=True)
             if st.button("&#8635; Reset Propagation", key="reset_prop_done"):
-                for key in ["propagation_scan_job_id", "propagation_submit_job_id"]:
-                    if key in st.session_state:
-                        del st.session_state[key]
+                for k in ["propagation_scan_job_id", "propagation_submit_job_id"]:
+                    st.session_state.pop(k, None)
                 st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
@@ -759,10 +1091,9 @@ def render_propagation_tab(source_job_id):
                 submit_data.get("progress", "Unknown error")
             ))
             st.markdown('<div class="reset-btn">', unsafe_allow_html=True)
-            if st.button("&#8635; Reset Propagation", key="reset_prop_submit_error"):
-                for key in ["propagation_scan_job_id", "propagation_submit_job_id"]:
-                    if key in st.session_state:
-                        del st.session_state[key]
+            if st.button("&#8635; Reset Propagation", key="reset_prop_sub_err"):
+                for k in ["propagation_scan_job_id", "propagation_submit_job_id"]:
+                    st.session_state.pop(k, None)
                 st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
@@ -773,12 +1104,14 @@ def render_propagation_tab(source_job_id):
             if selected_repos:
                 st.markdown(
                     '<div style="font-size:13px;color:#94a3b8;margin-bottom:12px;">'
-                    '<strong style="color:#e2e8f0;">{}</strong> repo(s) selected for propagation'
+                    '<strong style="color:#e2e8f0;">{}</strong> repo(s) selected'
                     '</div>'.format(len(selected_repos)),
                     unsafe_allow_html=True,
                 )
                 if st.button(
-                    "&#10145; Propagate Fixes to {} Repo(s)".format(len(selected_repos)),
+                    "&#10145; Propagate Fixes to {} Repo(s)".format(
+                        len(selected_repos)
+                    ),
                     key="propagate_btn",
                 ):
                     try:
@@ -787,7 +1120,9 @@ def render_propagation_tab(source_job_id):
                             json={
                                 "scan_job_id":    scan_job_id,
                                 "selected_repos": selected_repos,
-                                "pr_title":       "chore(deps): propagate vulnerability fixes",
+                                "pr_title": (
+                                    "chore(deps): propagate vulnerability fixes"
+                                ),
                                 "pr_description": (
                                     "Automated vulnerability fix propagation "
                                     "by dependency_refractor.\n\n"
@@ -814,10 +1149,9 @@ def render_propagation_tab(source_job_id):
 
         with col_rescan:
             st.markdown('<div class="reset-btn">', unsafe_allow_html=True)
-            if st.button("&#8635; Re-scan Repos", key="rescan_btn"):
-                del st.session_state["propagation_scan_job_id"]
-                if "propagation_submit_job_id" in st.session_state:
-                    del st.session_state["propagation_submit_job_id"]
+            if st.button("&#8635; Re-scan", key="rescan_btn"):
+                st.session_state.pop("propagation_scan_job_id", None)
+                st.session_state.pop("propagation_submit_job_id", None)
                 st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
@@ -826,6 +1160,8 @@ def render_propagation_tab(source_job_id):
 def render_report():
     html          = st.session_state.get("report_html", "")
     source_job_id = st.session_state.get("job_id", "")
+    repo_url      = st.session_state.get("input_repo_url", "")
+    branch_name   = st.session_state.get("input_branch_name", "")
 
     if not html:
         st.error("No report data found. Please run the analysis again.")
@@ -843,7 +1179,6 @@ def render_report():
             'color:#f1f5f9;padding:16px 0;">&#128270; dependency_refractor</div>',
             unsafe_allow_html=True,
         )
-
     with col2:
         st.download_button(
             label="&#11015; Download Report",
@@ -852,7 +1187,6 @@ def render_report():
             mime="text/html",
             key="download_report",
         )
-
     with col3:
         st.markdown('<div class="reset-btn">', unsafe_allow_html=True)
         if st.button("&#8635; Reset", key="reset_btn"):
@@ -863,14 +1197,14 @@ def render_report():
 
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    # ── Tabs ───────────────────────────────────────────────────────────────────
-    tab1, tab2 = st.tabs([
+    # ── Three tabs ─────────────────────────────────────────────────────────────
+    tab1, tab2, tab3 = st.tabs([
         "&#128196;  Analysis Report",
+        "&#9888;&#65039;  Vulnerability Fix PR",
         "&#128257;  Fix Propagation",
     ])
 
     with tab1:
-        # Render HTML report in base64 iframe — avoids script_runner.py conflicts
         try:
             encoded = base64.b64encode(html.encode("utf-8")).decode("utf-8")
             iframe  = (
@@ -891,7 +1225,13 @@ def render_report():
             )
 
     with tab2:
-        render_propagation_tab(source_job_id)
+        render_vuln_fix_tab(source_job_id, repo_url, branch_name)
+
+    with tab3:
+        render_propagation_tab(
+            source_job_id=source_job_id,
+            vuln_fix_deltas=st.session_state.get("vuln_fix_deltas", []),
+        )
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -910,24 +1250,12 @@ def main():
                 for err in errors:
                     st.error(err)
             else:
-                # Store propagation config before file is consumed
-                if inputs.get("target_repos_file"):
-                    st.session_state["target_repos_content"] = (
-                        inputs["target_repos_file"]
-                        .read()
-                        .decode("utf-8", errors="replace")
-                    )
-                    st.session_state["target_repos_branch"] = (
-                        inputs["target_repos_branch"] or "main"
-                    )
-                else:
-                    st.session_state.pop("target_repos_content", None)
-                    st.session_state.pop("target_repos_branch", None)
-
                 job_id = submit_analysis(inputs)
                 if job_id:
-                    st.session_state["job_id"] = job_id
-                    st.session_state["view"]   = "progress"
+                    st.session_state["job_id"]            = job_id
+                    st.session_state["input_repo_url"]    = inputs["repo_url"]
+                    st.session_state["input_branch_name"] = inputs["branch_name"]
+                    st.session_state["view"]              = "progress"
                     st.rerun()
 
     elif view == "progress":

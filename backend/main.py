@@ -6,7 +6,7 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTa
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
-
+from backend.core.fix_delta_extractor import FixDelta, FixDeltaExtractor
 from backend.config import settings
 from backend.core.log_fetcher import LogFetcher
 from backend.core.log_parser import BuildLogParser
@@ -65,6 +65,14 @@ class PRRequest(BaseModel):
     pr_description:    str
     selections_by_file: dict   # { gradle_path: [{ gav, is_unused, is_test_only, ... }] }
 
+class VulnFixPRRequest(BaseModel):
+    repo_url:    str
+    branch_name: str
+    pr_branch:   Optional[str] = "dependency-refractor/vuln-fixes"
+    pr_title:    Optional[str] = "chore(deps): fix vulnerable dependency versions"
+    fixes:       List[Dict]    # [{ ga, from_version, to_version, cve_ids, gradle_file, line_number, raw_line }]
+
+
 def _make_clients(repo_url):
     repo = repo_url.replace("https://github.com/", "").rstrip("/")
 
@@ -94,7 +102,8 @@ def _run_analysis(job_id, log_content, repo_url, branch_name, service_name):
             job_id, len(log_content)
         ))
         JOBS[job_id] = {"status": "running", "progress": "Parsing dependency tree...", "errors": []}
-
+        JOBS[job_id]["repo_url"]    = repo_url
+        JOBS[job_id]["branch_name"] = branch_name
         # ── Parse ──────────────────────────────────────────────────────────
         parser   = BuildLogParser()
         all_deps = parser.parse(log_content)
@@ -156,6 +165,40 @@ def _run_analysis(job_id, log_content, repo_url, branch_name, service_name):
             logger.error("[{}] Unused failed: {}".format(job_id, e), exc_info=True)
             unused_results = {}
             JOBS[job_id]["errors"].append("Unused analysis error: {}".format(str(e)))
+
+        # In _run_analysis, after unused analysis, before generate_report:
+        # Store vuln results enriched with gradle file locations
+        enriched_vulns = []
+        for dep in vuln_results:
+            dep_info = {
+                "gav":           dep.gav,
+                "group":         dep.group,
+                "artifact":      dep.artifact,
+                "version":       dep.version,
+                "is_vulnerable": dep.is_vulnerable,
+                "safe_version":  dep.safe_version,
+                "vulnerabilities": [
+                    {
+                        "cve_id":      v.cve_id,
+                        "severity":    v.severity,
+                        "cvss":        v.cvss,
+                        "title":       v.title,
+                        "fixed_in":    v.fixed_in,
+                    }
+                    for v in dep.vulnerabilities
+                ],
+            }
+            enriched_vulns.append(dep_info)
+
+        JOBS[job_id] = {
+            "status":          "done",
+            "progress":        "Complete",
+            "html":            html,
+            "errors":          JOBS[job_id].get("errors", []),
+            "conflict_issues": conflict_issues,
+            "vuln_results":    vuln_results,
+            "enriched_vulns":  enriched_vulns,
+        }
 
         # ── Report ─────────────────────────────────────────────────────────
         JOBS[job_id]["progress"] = "Generating report..."
@@ -320,10 +363,10 @@ def debug_job(job_id: str):
 
 
 class PropagationScanRequest(BaseModel):
-    source_job_id:   str
-    target_branch:   str
-    repo_file_content: str    # raw text content of the ~ delimited file
-
+    source_job_id:       Optional[str] = None
+    fix_deltas_override: Optional[List[Dict]] = None   # from vuln PR tab
+    target_branch:       str
+    repo_file_content:   str
 
 class PropagationSubmitRequest(BaseModel):
     scan_job_id:     str
@@ -354,7 +397,6 @@ def propagate_scan(req: PropagationScanRequest, background_tasks: BackgroundTask
 
     def run_scan():
         try:
-            # Parse repo list
             parser    = RepoFileParser()
             repo_urls = parser.parse(req.repo_file_content)
 
@@ -368,24 +410,57 @@ def propagate_scan(req: PropagationScanRequest, background_tasks: BackgroundTask
                 return
 
             PROPAGATION_JOBS[scan_job_id]["progress"] = (
-                "Extracting fix delta from source analysis..."
+                "Extracting fix delta..."
             )
 
-            # Extract fix delta from source job
-            # We need the stored conflict and vuln results
-            conflict_issues = source_job.get("conflict_issues", [])
-            vuln_results    = source_job.get("vuln_results", [])
-            fix_deltas      = FixDeltaExtractor().extract(conflict_issues, vuln_results)
-
-            logger.info("Scan job {} — {} fix deltas, {} target repos".format(
-                scan_job_id, len(fix_deltas), len(repo_urls)
-            ))
+            # ── Get fix deltas — from vuln PR tab or from source analysis ──────
+            if req.fix_deltas_override:
+                # Deltas passed directly from vuln fix PR tab
+                fix_deltas = [
+                    FixDelta(
+                        ga=d["ga"],
+                        from_version=d["from_version"],
+                        to_version=d["to_version"],
+                        reason=d.get("reason", ""),
+                        cve_ids=d.get("cve_ids", []),
+                    )
+                    for d in req.fix_deltas_override
+                ]
+                logger.info("Using {} fix delta(s) from vuln PR tab".format(
+                    len(fix_deltas)
+                ))
+            elif req.source_job_id:
+                # Fall back to extracting from source analysis job
+                source_job = JOBS.get(req.source_job_id)
+                if not source_job:
+                    PROPAGATION_JOBS[scan_job_id] = {
+                        "status":   "error",
+                        "progress": "Source job not found",
+                        "result":   None,
+                        "errors":   ["Source job not found"],
+                    }
+                    return
+                conflict_issues = source_job.get("conflict_issues", [])
+                vuln_results    = source_job.get("vuln_results", [])
+                fix_deltas      = FixDeltaExtractor().extract(
+                    conflict_issues, vuln_results
+                )
+                logger.info("Extracted {} fix delta(s) from source analysis".format(
+                    len(fix_deltas)
+                ))
+            else:
+                PROPAGATION_JOBS[scan_job_id] = {
+                    "status":   "error",
+                    "progress": "No fix source provided",
+                    "result":   None,
+                    "errors":   ["Provide either source_job_id or fix_deltas_override"],
+                }
+                return
 
             PROPAGATION_JOBS[scan_job_id]["progress"] = (
                 "Scanning {} target repos...".format(len(repo_urls))
             )
 
-            # Scan repos
             engine = PropagationEngine(
                 github_pat=settings.GITHUB_PAT,
                 proxy_url=settings.PROXY_URL,
@@ -395,11 +470,11 @@ def propagate_scan(req: PropagationScanRequest, background_tasks: BackgroundTask
             result = engine.scan_repos(repo_urls, req.target_branch, fix_deltas)
 
             PROPAGATION_JOBS[scan_job_id] = {
-                "status":      "done",
-                "progress":    "Scan complete",
-                "result":      result,
-                "fix_deltas":  fix_deltas,
-                "errors":      [],
+                "status":     "done",
+                "progress":   "Scan complete",
+                "result":     result,
+                "fix_deltas": fix_deltas,
+                "errors":     [],
             }
             logger.info("Propagation scan done — {} repos with fixes".format(
                 result.repos_with_fixes
@@ -551,4 +626,114 @@ def propagate_submit_status(submit_job_id: str):
         "progress": job.get("progress", ""),
         "pr_urls":  job.get("pr_urls", {}),
         "errors":   job.get("errors", []),
+    }
+
+@app.post("/vuln/raise-pr")
+def raise_vuln_fix_pr(req: VulnFixPRRequest, background_tasks: BackgroundTasks):
+    """
+    Raises a PR on the source repo fixing vulnerable dependency versions
+    across all matching build.gradle files.
+    """
+    job_id = str(uuid.uuid4())
+    JOBS[job_id] = {
+        "status":   "running",
+        "progress": "Creating vulnerability fix PR...",
+        "errors":   [],
+        "pr_url":   "",
+        "fix_deltas": [],
+    }
+
+    def run():
+        try:
+            _, github = _make_clients(req.repo_url)
+            engine    = PropagationEngine(
+                github_pat=settings.GITHUB_PAT,
+                proxy_url=settings.PROXY_URL,
+                ssl_verify=settings.ssl_verify,
+                timeout=settings.SNYK_TIMEOUT,
+            )
+
+            # Reconstruct FixDelta objects from request
+            fix_deltas = []
+            for f in req.fixes:
+                delta = FixDelta(
+                    ga=f["ga"],
+                    from_version=f["from_version"],
+                    to_version=f["to_version"],
+                    reason=f.get("reason", "Snyk vulnerability fix"),
+                    cve_ids=f.get("cve_ids", []),
+                )
+                delta.gradle_file  = f.get("gradle_file", "build.gradle")
+                delta.line_number  = f.get("line_number", 0)
+                delta.raw_line     = f.get("raw_line", "")
+                delta.config       = f.get("config", "implementation")
+                fix_deltas.append(delta)
+
+            repo_name = req.repo_url.replace(
+                "https://github.com/", ""
+            ).rstrip("/")
+
+            # Build a fake RepoFixSummary for the source repo
+            from backend.core.propagation_engine import RepoFixSummary
+            summary = RepoFixSummary(
+                repo_url=req.repo_url,
+                repo_name=repo_name,
+                branch=req.branch_name,
+                applicable_fixes=fix_deltas,
+            )
+
+            pr_url = engine.submit_pr(
+                summary=summary,
+                pr_branch_prefix=req.pr_branch,
+                pr_title=req.pr_title,
+                pr_description=(
+                    "Automated vulnerability fix PR raised by dependency_refractor.\n\n"
+                    "The following vulnerable dependencies were identified by Snyk "
+                    "and upgraded to safe versions."
+                ),
+            )
+
+            logger.info("Vuln fix PR created: {}".format(pr_url))
+            JOBS[job_id] = {
+                "status":   "done",
+                "progress": "PR created",
+                "errors":   [],
+                "pr_url":   pr_url,
+                "fix_deltas": [
+                    {
+                        "ga":           d.ga,
+                        "from_version": d.from_version,
+                        "to_version":   d.to_version,
+                        "reason":       d.reason,
+                        "cve_ids":      d.cve_ids,
+                    }
+                    for d in fix_deltas
+                ],
+            }
+
+        except Exception as e:
+            logger.error("Vuln fix PR failed: {}".format(e), exc_info=True)
+            JOBS[job_id] = {
+                "status":     "error",
+                "progress":   str(e),
+                "errors":     [str(e)],
+                "pr_url":     "",
+                "fix_deltas": [],
+            }
+
+    background_tasks.add_task(run)
+    return {"job_id": job_id}
+
+@app.get("/job/{job_id}/vulns")
+def get_job_vulns(job_id: str):
+    """Returns vulnerable deps with their details for Tab 2 editing."""
+    job = JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.get("status") != "done":
+        raise HTTPException(status_code=400, detail="Job not complete")
+    return {
+        "enriched_vulns": job.get("enriched_vulns", []),
+        "repo_url":       job.get("repo_url", ""),
+        "branch_name":    job.get("branch_name", ""),
     }
