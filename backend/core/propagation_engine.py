@@ -200,94 +200,181 @@ class PropagationEngine:
 
         return summary
 
-    def submit_pr(self, summary, pr_branch_prefix, pr_title=None,
-                  pr_description=None):
-        # type: (RepoFixSummary, str, str, str) -> str
-        """
-        Creates a PR in the target repo with all applicable fixes.
-        Returns the PR URL.
-        """
-        import datetime
-        date_str  = datetime.datetime.now().strftime("%Y%m%d")
-        pr_branch = "{}/{}".format(
-            pr_branch_prefix,
-            date_str,
+def submit_pr(self, summary, pr_branch_prefix,
+              pr_title=None, pr_description=None):
+    # type: (RepoFixSummary, str, str, str) -> str
+    import datetime
+    date_str  = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    pr_branch = "{}/{}".format(pr_branch_prefix, date_str)
+
+    github = self._make_github_client(summary.repo_name)
+
+    # ── Step 1: Discover actual build.gradle paths from repo tree ──────────
+    logger.info("Discovering build.gradle paths in '{}'".format(
+        summary.repo_name
+    ))
+    tree = github.get_tree(summary.branch)
+    actual_gradle_paths = [
+        f["path"] for f in tree
+        if f["path"].endswith("build.gradle")
+        and "buildSrc" not in f["path"]
+    ]
+    logger.info("Found gradle files: {}".format(actual_gradle_paths))
+
+    if not actual_gradle_paths:
+        raise RuntimeError(
+            "No build.gradle files found in '{}' on branch '{}'".format(
+                summary.repo_name, summary.branch
+            )
         )
 
-        github    = self._make_github_client(summary.repo_name)
-
-        # Group fixes by gradle file
-        fixes_by_file = {}   # type: Dict[str, List[FixDelta]]
-        for fix in summary.applicable_fixes:
-            gradle_file = getattr(fix, "gradle_file", None)
-            if not gradle_file:
-                continue
-            if gradle_file not in fixes_by_file:
-                fixes_by_file[gradle_file] = []
-            fixes_by_file[gradle_file].append(fix)
-
-        if not fixes_by_file:
-            raise RuntimeError("No applicable fixes with gradle file info")
-
-        # Create branch
-        head_sha = github.get_branch_sha(summary.branch)
-        github.create_branch(pr_branch, head_sha)
-
-        # Commit each modified gradle file
-        for gradle_file, fixes in fixes_by_file.items():
-            original = github.get_file_content(gradle_file, summary.branch)
-            modified = self._apply_fixes(original, fixes)
-            file_sha = github.get_file_sha(gradle_file, summary.branch)
-
-            commit_msg = "chore(deps): upgrade {} vulnerable dep(s) in {}".format(
-                len(fixes), gradle_file
+    def resolve_path(incoming_path):
+        # type: (str) -> str
+        if incoming_path in actual_gradle_paths:
+            return incoming_path
+        matches = [
+            p for p in actual_gradle_paths
+            if p.endswith(incoming_path) or p == incoming_path
+        ]
+        if matches:
+            logger.info("Resolved '{}' -> '{}'".format(
+                incoming_path, matches[0]
+            ))
+            return matches[0]
+        if actual_gradle_paths:
+            logger.warning(
+                "Could not resolve '{}' — falling back to '{}'".format(
+                    incoming_path, actual_gradle_paths[0]
+                )
             )
+            return actual_gradle_paths[0]
+        raise RuntimeError(
+            "Cannot resolve gradle path '{}'".format(incoming_path)
+        )
+
+    # ── Step 2: Group fixes by actual resolved gradle file ─────────────────
+    fixes_by_file = {}   # type: Dict[str, List]
+    for fix in summary.applicable_fixes:
+        incoming = getattr(fix, "gradle_file", "") or ""
+        if not incoming:
+            # No gradle file hint — apply to all gradle files
+            # that contain this dependency
+            logger.warning(
+                "No gradle_file on fix for {} — "
+                "will search all gradle files".format(fix.ga)
+            )
+            for actual_path in actual_gradle_paths:
+                if actual_path not in fixes_by_file:
+                    fixes_by_file[actual_path] = []
+                fixes_by_file[actual_path].append(fix)
+        else:
+            actual_path = resolve_path(incoming)
+            if actual_path not in fixes_by_file:
+                fixes_by_file[actual_path] = []
+            fixes_by_file[actual_path].append(fix)
+
+    if not fixes_by_file:
+        raise RuntimeError("No fixes with valid gradle file paths found")
+
+    logger.info("Fixes by file: {}".format(list(fixes_by_file.keys())))
+
+    # ── Step 3: Get HEAD SHA and create branch ─────────────────────────────
+    head_sha = github.get_branch_sha(summary.branch)
+    logger.info("HEAD SHA: {}".format(head_sha))
+
+    try:
+        github.create_branch(pr_branch, head_sha)
+        logger.info("Branch created: {}".format(pr_branch))
+    except Exception as e:
+        logger.warning(
+            "Branch creation failed (may already exist): {}".format(e)
+        )
+
+    # ── Step 4: Commit each modified gradle file ───────────────────────────
+    for actual_path, fixes in fixes_by_file.items():
+        logger.info("Processing '{}' — {} fix(es)".format(
+            actual_path, len(fixes)
+        ))
+
+        try:
+            original = github.get_file_content(actual_path, summary.branch)
+            logger.info("Content fetched: {} chars".format(len(original)))
+        except Exception as e:
+            logger.error("Could not fetch '{}': {}".format(actual_path, e))
+            continue
+
+        # Only commit if the file actually contains the dep
+        modified = self._apply_fixes(original, fixes)
+        if modified == original:
+            logger.info("No changes in '{}' — skipping".format(actual_path))
+            continue
+
+        try:
+            file_sha = github.get_file_sha(actual_path, summary.branch)
+            logger.info("File SHA: {}".format(file_sha))
+        except Exception as e:
+            logger.error("Could not get SHA for '{}': {}".format(actual_path, e))
+            continue
+
+        commit_msg = "chore(deps): upgrade {} dep(s) in {}".format(
+            len(fixes), actual_path
+        )
+
+        try:
             github.commit_file(
-                path=gradle_file,
+                path=actual_path,
                 new_content=modified,
                 branch=pr_branch,
                 message=commit_msg,
                 file_sha=file_sha,
             )
-            logger.info("Committed {} to {} in {}".format(
-                gradle_file, pr_branch, summary.repo_name
-            ))
+            logger.info("Committed: {}".format(actual_path))
+        except Exception as e:
+            logger.error("Commit failed for '{}': {}".format(actual_path, e))
+            continue
 
-        # Build PR body
-        title = pr_title or "chore(deps): propagate vulnerability fixes"
-        body_lines = [
-            pr_description or "Automated vulnerability fix propagation by dependency_refractor.",
-            "",
-            "---",
-            "### Changes",
-            "",
-        ]
-        for fix in summary.applicable_fixes:
-            body_lines.append(
-                "- `{}` upgraded from `{}` to `{}` — {}".format(
-                    fix.ga,
-                    fix.from_version,
-                    fix.to_version,
-                    ", ".join(fix.cve_ids[:3]) if fix.cve_ids else fix.reason,
-                )
+    # ── Step 5: Open PR ────────────────────────────────────────────────────
+    title = pr_title or "chore(deps): fix vulnerable dependencies"
+    body_lines = [
+        pr_description or "Automated fix by dependency_refractor.",
+        "",
+        "---",
+        "### Changes",
+        "",
+    ]
+    for fix in summary.applicable_fixes:
+        body_lines.append(
+            "- `{}` `{}` → `{}` — {}".format(
+                fix.ga,
+                fix.from_version,
+                fix.to_version,
+                ", ".join(fix.cve_ids[:3]) if fix.cve_ids else fix.reason,
             )
+        )
+    body_lines += [
+        "",
+        "---",
+        "_Raised by dependency_refractor_",
+    ]
 
-        body_lines += [
-            "",
-            "---",
-            "_Propagated by [dependency_refractor](https://github.com) "
-            "from source repo analysis._",
-        ]
-
+    logger.info("Opening PR '{}' -> '{}'".format(pr_branch, summary.branch))
+    try:
         pr_url = github.create_pr(
             title=title,
             body="\n".join(body_lines),
             head_branch=pr_branch,
             base_branch=summary.branch,
         )
-
         logger.info("PR created: {}".format(pr_url))
         return pr_url
+    except Exception as e:
+        logger.error("PR creation failed: {}".format(e))
+        raise RuntimeError(
+            "Could not create PR from '{}' to '{}'. "
+            "It may already exist. Error: {}".format(
+                pr_branch, summary.branch, str(e)
+            )
+        )
 
     def _apply_fixes(self, gradle_content, fixes):
         # type: (str, List[FixDelta]) -> str
