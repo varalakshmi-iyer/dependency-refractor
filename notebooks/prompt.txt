@@ -1,0 +1,417 @@
+Create a complete Spring Boot 3.2 Java 17 Gradle project called "DepAssist" 
+for Citi's internal dependency intelligence platform. The tool helps 
+engineering teams identify duplicate, unused, and conflicting dependencies 
+across their Spring Boot microservices, reducing CVE exposure by eliminating 
+redundant libraries.
+
+════════════════════════════════════════════════════════
+PROJECT STRUCTURE
+════════════════════════════════════════════════════════
+
+Generate all files with complete, working code. No placeholders, 
+no TODO comments, no partial implementations.
+
+dep-assist/
+├── build.gradle
+├── playbook.yaml                    ← sample data, 5-6 entries
+├── audit.json                       ← empty array []
+├── src/main/java/com/citi/depassist/
+│   ├── DepAssistApplication.java
+│   ├── controller/
+│   │   ├── ApiController.java       ← all REST endpoints
+│   │   └── UiController.java        ← Thymeleaf page controller
+│   ├── service/
+│   │   ├── PlaybookService.java     ← reads/parses playbook.yaml
+│   │   └── AuditService.java        ← reads/writes audit.json
+│   └── model/
+│       ├── AuditRecord.java
+│       ├── DuplicateCluster.java
+│       └── PlaybookSummary.java
+├── src/main/resources/
+│   ├── application.properties
+│   └── templates/
+│       └── index.html               ← Thymeleaf template
+
+════════════════════════════════════════════════════════
+BUILD.GRADLE
+════════════════════════════════════════════════════════
+
+plugins:
+  - java
+  - org.springframework.boot version 3.2.0
+  - io.spring.dependency-management version 1.1.4
+
+dependencies:
+  - spring-boot-starter-web
+  - spring-boot-starter-thymeleaf
+  - org.yaml:snakeyaml:2.2
+  - jackson-databind
+  - jackson-datatype-jsr310
+  - spring-boot-starter-test (testImplementation)
+
+group: com.citi
+version: 1.0.0
+sourceCompatibility: 17
+
+════════════════════════════════════════════════════════
+APPLICATION.PROPERTIES
+════════════════════════════════════════════════════════
+
+server.port=8080
+deptool.playbook-path=${DEPASSIST_PLAYBOOK_PATH:playbook.yaml}
+deptool.audit-path=${DEPASSIST_AUDIT_PATH:audit.json}
+spring.thymeleaf.cache=false
+spring.jackson.serialization.write-dates-as-timestamps=false
+
+════════════════════════════════════════════════════════
+MODEL CLASSES
+════════════════════════════════════════════════════════
+
+AuditRecord.java:
+  Fields (all with getters/setters):
+    - String id                        (UUID)
+    - Instant timestamp
+    - String serviceName
+    - String validationMode            (devin_playbook_update | text | repo | jar)
+    - int dependenciesValidated
+    - int duplicateClustersFound
+    - int uncategorizedCount
+    - String triggeredBy               (devin | api | user)
+    - String inputMode                 (nullable, Phase 2)
+    - Integer cveCount                 (nullable, Phase 3)
+    - String snykScanId                (nullable, Phase 3)
+    - Double priorityScore             (nullable, Phase 3)
+
+  Use @JsonInclude(JsonInclude.Include.NON_NULL) on the class.
+
+  Static factory method:
+    AuditRecord.create(serviceName, validationMode, dependenciesValidated,
+                       duplicateClustersFound, uncategorizedCount, triggeredBy)
+    Sets id = UUID.randomUUID().toString(), timestamp = Instant.now()
+
+DuplicateCluster.java:
+  Fields (all with getters/setters):
+    - String category
+    - List<String> artifacts
+    - String recommended
+    - String reason
+    - String lastUpdated
+
+  Constructor: DuplicateCluster(category, artifacts, recommended, reason, lastUpdated)
+
+PlaybookSummary.java:
+  Fields (all with getters/setters):
+    - Map<String, String> meta
+    - int totalArtifacts
+    - int totalClusters
+    - Map<String, Integer> categoryCounts
+    - List<DuplicateCluster> clusters
+    - List<String> uncategorized
+
+════════════════════════════════════════════════════════
+PLAYBOOKSERVICE.JAVA
+════════════════════════════════════════════════════════
+
+@Service, reads playbook.yaml using SnakeYAML.
+
+@Value("${deptool.playbook-path}") private String playbookPath;
+
+Two public methods:
+
+1. Map<String, Object> readRaw() throws IOException
+   - Reads the yaml file as a nested Map
+   - Returns empty LinkedHashMap if file is empty
+
+2. PlaybookSummary getSummary() throws IOException
+   - Calls readRaw() internally
+   - Extracts library_categories, categories, meta from the map
+   - Builds categoryCounts: Map<String, Integer> counting artifacts per category
+   - Builds List<DuplicateCluster> from the categories section
+   - Builds uncategorized list: artifacts in library_categories but NOT in any
+     cluster's artifact list
+   - Returns fully populated PlaybookSummary
+
+All map casts use @SuppressWarnings("unchecked").
+
+════════════════════════════════════════════════════════
+AUDITSERVICE.JAVA
+════════════════════════════════════════════════════════
+
+@Service, reads/writes audit.json using Jackson ObjectMapper.
+
+Constructor registers JavaTimeModule on the ObjectMapper.
+
+@Value("${deptool.audit-path}") private String auditPath;
+
+Three public methods:
+
+1. List<AuditRecord> readAll() throws IOException
+   - Creates the file with content "[]" if it does not exist
+   - Deserializes using TypeReference<List<AuditRecord>>
+
+2. synchronized AuditRecord append(AuditRecord record) throws IOException
+   - Reads current list, adds record, writes back with pretty printer
+   - Returns the appended record
+
+3. Map<String, Object> getAuditResponse(int limit, String serviceNameFilter)
+     throws IOException
+   - Reads all records
+   - Filters by serviceNameFilter if not null/blank (case-insensitive contains)
+   - Sorts newest-first by timestamp
+   - Returns LinkedHashMap with keys "total" (int) and "records" (List, paged)
+
+4. Map<String, Object> getAuditStats() throws IOException
+   - Returns LinkedHashMap with:
+     "total": records.size()
+     "uniqueServices": distinct service names count
+     "totalDependenciesValidated": sum of all dependenciesValidated
+     "totalClustersFound": sum of all duplicateClustersFound
+
+════════════════════════════════════════════════════════
+APICONTROLLER.JAVA
+════════════════════════════════════════════════════════
+
+@RestController @RequestMapping("/api")
+Constructor-injected PlaybookService and AuditService.
+
+Endpoints -- all return ResponseEntity, catch Exception and return 500:
+
+GET /api/health
+  Returns: status, playbookArtifacts, playbookClusters, lastUpdated, totalAudits
+
+GET /api/playbook
+  Returns: full playbook as Map<String, Object> (for offline clients and Devin)
+
+GET /api/playbook/summary
+  Returns: PlaybookSummary object
+
+GET /api/audit
+  @RequestParam(defaultValue="50") int limit
+  @RequestParam(required=false) String serviceName
+  Returns: Map with "total" and "records"
+
+GET /api/audit/stats
+  Returns: Map with total, uniqueServices, totalDependenciesValidated,
+           totalClustersFound
+
+POST /api/audit/record
+  All @RequestParam:
+    String serviceName
+    String validationMode
+    int dependenciesValidated
+    int duplicateClustersFound
+    int uncategorizedCount
+    @RequestParam(defaultValue="api") String triggeredBy
+  Creates AuditRecord via AuditRecord.create(), calls auditService.append()
+  Returns: Map with "status":"recorded" and "id": record.getId()
+
+════════════════════════════════════════════════════════
+UICONTROLLER.JAVA
+════════════════════════════════════════════════════════
+
+@Controller
+Constructor-injected PlaybookService and AuditService.
+
+GET / 
+  @RequestParam(defaultValue="playbook") String tab
+  Adds to model:
+    "summary"      ← PlaybookSummary (catch exception, add "playbookError" string)
+    "auditStats"   ← Map from getAuditStats()
+    "auditRecords" ← List from getAuditResponse(50, null).get("records")
+    "activeTab"    ← the tab param value
+  Returns: "index" (Thymeleaf template name)
+
+════════════════════════════════════════════════════════
+THYMELEAF TEMPLATE — index.html
+════════════════════════════════════════════════════════
+
+Full HTML page with xmlns:th="http://www.thymeleaf.org".
+No JavaScript frameworks. Minimal JS only for client-side filtering.
+Tab switching uses href with ?tab= query parameter (full page reload, no JS).
+Load Tabler Icons from CDN for icons: 
+  https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css
+
+LAYOUT:
+  - Topbar: dark navy background, app name "DepAssist", health indicator
+  - Tab navigation: two tabs — "Playbook" and "Audit trail"
+  - Main content area: max-width 1100px, centered
+
+PLAYBOOK TAB (activeTab == 'playbook'):
+  Stats row (4 cards): Total artifacts, Duplicate clusters, Categories, Last updated
+  
+  Section: "Duplicate clusters"
+    - Dropdown filter by category (uses th:each over summary.clusters)
+    - Each cluster rendered as a card:
+        - Category badge (styled pill, uppercase)
+        - Artifact tags (recommended one highlighted in green with checkmark)
+        - "Standardize on X" line
+        - Reason box with left border accent
+    - Empty state if no clusters
+  
+  Section: "Uncategorized" 
+    - Shows count in brackets
+    - Renders each as a monospace tag
+    - Only shown if list is not empty: th:if="${!#lists.isEmpty(summary.uncategorized)}"
+  
+  Meta bar: "playbook.yaml · last updated DATE by REPO"
+  
+  Collapsible raw yaml section (HTML details/summary element)
+
+AUDIT TAB (activeTab == 'audit'):
+  Stats row (4 cards): Total validations, Services tracked, Deps validated, Clusters found
+  
+  Filter input: text input filtering by service name (client-side JS)
+  
+  Table with columns:
+    Service | Date | Mode | Deps validated | Duplicate clusters | Uncategorized | Triggered by
+  
+  Table rendering:
+    - Date formatted using #temporals.format(record.timestamp, 'dd MMM yyyy')
+    - Time using #temporals.format(record.timestamp, 'HH:mm') + ' UTC'
+    - Mode displayed as badge (replace underscores with spaces)
+    - Duplicate clusters as colored circle pill:
+        green if 0 clusters, amber if > 0
+    - Empty state row if auditRecords is empty
+
+ERROR HANDLING:
+  Show red error box if playbookError or auditError model attributes exist.
+
+CSS:
+  Write all CSS inline in a <style> block in <head>.
+  Use CSS custom properties for colors matching a professional internal tool:
+    --bg: #f8f9fa
+    --surface: #ffffff  
+    --border: #e9ecef
+    --text: #212529
+    --text-muted: #6c757d
+    --accent: #1a3a5c     (dark navy, Citi-adjacent)
+    --accent-light: #e8f0f8
+  Border radius: 8px for elements, 12px for cards.
+  No external CSS frameworks.
+
+JS (minimal, at bottom of body):
+  filterClusters(cat): shows/hides cluster cards based on data-category attribute
+  filterAudit(val): shows/hides table rows based on data-service attribute
+
+════════════════════════════════════════════════════════
+PLAYBOOK.YAML — SAMPLE DATA
+════════════════════════════════════════════════════════
+
+Generate a valid playbook.yaml with this exact structure:
+
+meta:
+  last_updated: "2026-07-06"
+  last_updated_by_repo: "payment-service"
+
+library_categories:
+  guava:
+    category: string-utils
+    source: repo_scan
+    added: "2026-07-01"
+  commons-lang3:
+    category: string-utils
+    source: repo_scan
+    added: "2026-07-01"
+  jackson-databind:
+    category: json
+    source: repo_scan
+    added: "2026-07-01"
+  gson:
+    category: json
+    source: repo_scan
+    added: "2026-07-01"
+  kafka-clients:
+    category: messaging
+    source: repo_scan
+    added: "2026-07-02"
+  kafka:
+    category: messaging
+    source: repo_scan
+    added: "2026-07-02"
+  slf4j-api:
+    category: logging
+    source: repo_scan
+    added: "2026-07-01"
+
+categories:
+  string-utils:
+    artifacts: [guava, commons-lang3]
+    recommended: commons-lang3
+    reason: "Smaller, single-purpose library. Guava carries unnecessary transitive footprint if only string utils are needed."
+    last_updated: "2026-07-06"
+  json:
+    artifacts: [jackson-databind, gson]
+    recommended: jackson-databind
+    reason: "Spring Boot default with broadest ecosystem support. Gson lacks annotation-based configuration."
+    last_updated: "2026-07-06"
+  messaging:
+    artifacts: [kafka, kafka-clients]
+    recommended: kafka-clients
+    reason: "kafka full distribution pulls in broker and Zookeeper dependencies unnecessary for producer/consumer-only services."
+    last_updated: "2026-07-06"
+
+════════════════════════════════════════════════════════
+AUDIT.JSON — INITIAL STATE
+════════════════════════════════════════════════════════
+
+[]
+
+════════════════════════════════════════════════════════
+QUALITY REQUIREMENTS
+════════════════════════════════════════════════════════
+
+1. Every Java file must compile cleanly with no missing imports.
+   Include all import statements at the top of each file.
+
+2. Every Thymeleaf expression must be valid:
+   - Use th:if, th:each, th:text, th:classappend, th:href correctly
+   - Date formatting: #temporals.format(record.timestamp, 'dd MMM yyyy')
+   - List check: #lists.isEmpty(list), #lists.size(list)
+   - Map access: map['key'] or map.key
+   - String operations: str.replace('_',' ')
+
+3. The application must start with:
+   ./gradlew bootRun
+   and serve the UI at http://localhost:8080
+
+4. The two data files (playbook.yaml, audit.json) must be read on every
+   request -- NOT cached at startup -- so Devin commits are reflected
+   immediately without a server restart.
+
+5. All map casts from SnakeYAML output use @SuppressWarnings("unchecked").
+
+6. AuditService.append() must be synchronized for thread safety.
+
+7. PlaybookSummary.getUncategorized() must return artifacts that appear in
+   library_categories but do NOT appear in any category's artifact list.
+
+════════════════════════════════════════════════════════
+WHAT NOT TO GENERATE
+════════════════════════════════════════════════════════
+
+- No Spring Security (internal tool, no auth needed)
+- No database or JPA (storage is playbook.yaml + audit.json only)
+- No Docker or Kubernetes files
+- No test classes (keep scope minimal)
+- No Lombok (explicit getters/setters only)
+- No frontend build tools (no npm, webpack, React)
+- No external CSS frameworks (plain CSS only)
+- No placeholder comments like // TODO or // implement this
+
+════════════════════════════════════════════════════════
+VERIFICATION CHECKLIST
+════════════════════════════════════════════════════════
+
+After generating, verify:
+  [ ] build.gradle has all required dependencies
+  [ ] All Java files have complete import statements
+  [ ] PlaybookService reads library_categories AND categories from yaml
+  [ ] AuditService creates audit.json if it does not exist
+  [ ] ApiController has all 6 endpoints listed above
+  [ ] UiController passes all 4 model attributes to the template
+  [ ] Thymeleaf template has both tab panels with correct th:classappend
+  [ ] Tab switching uses ?tab=playbook and ?tab=audit href links
+  [ ] Cluster filter dropdown is populated from summary.clusters via th:each
+  [ ] Audit table renders timestamp using #temporals.format
+  [ ] playbook.yaml has meta, library_categories, and categories sections
+  [ ] audit.json contains only []
